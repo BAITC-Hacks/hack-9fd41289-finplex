@@ -5,15 +5,18 @@ services:
     build: ./backend
     environment:
       DATA_DIR: /data
-      LLM_ENABLED: "${LLM_ENABLED:-true}"
+      LLM_ENABLED: "${LLM_ENABLED:-false}"
+      API_KEY: "${API_KEY:-}"
+      DATABASE_PATH: /state/planner.sqlite3
       LLM_API_KEY: "${LLM_API_KEY:-}"
       LLM_BASE_URL: "${LLM_BASE_URL:-https://api.openai.com/v1}"
       LLM_MODEL: "${LLM_MODEL:-gpt-4o-mini}"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3100,http://127.0.0.1:3100}"
     volumes:
       - ./data:/data:ro          # данные партнёра монтируем только на чтение
+      - planner-state:/state
     ports:
-      - "8020:8020"
+      - "127.0.0.1:8020:8020"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8020/health"]
       interval: 10s
@@ -25,8 +28,11 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "${FRONTEND_PORT:-3100}:80"
+      - "127.0.0.1:${FRONTEND_PORT:-3100}:80"
     depends_on:
       backend:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  planner-state:

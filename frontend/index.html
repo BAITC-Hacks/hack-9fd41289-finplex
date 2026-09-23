@@ -1,127 +1,38 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru" data-theme="light">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Планирование заказов поставщикам</title>
-  <link rel="stylesheet" href="styles.css" />
-</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Планирование закупок</title><link rel="stylesheet" href="styles.css"></head>
 <body>
-  <header class="topbar">
-    <div class="brand">📦 Планирование заказов поставщикам</div>
-    <div class="top-right">
-      <span class="status" id="status" title="Состояние подключения к серверу расчёта"></span>
-      <button class="theme-btn" id="theme" title="Переключить светлую/тёмную тему">🌙</button>
-    </div>
-  </header>
-
-  <main class="container">
-    <!-- Подсказка-инструкция -->
-    <div class="hint-banner" id="hintBanner">
-      <b>Как пользоваться:</b> выберите поставщика и нажмите <b>«Рассчитать заказ»</b>.
-      Система покажет, что и сколько заказать, с объяснением по каждой позиции.
-      Проверьте список, отметьте нужные позиции галочками и нажмите «Сформировать заказ».
-      <button class="hint-close" id="hintClose" title="Скрыть подсказку">✕</button>
-    </div>
-
-    <!-- Панель настроек расчёта -->
-    <section class="card">
-      <div class="section-label">Настройки расчёта</div>
-      <div class="filters-bar">
-        <label class="field">
-          <span class="field-label">Поставщик <i class="help" data-tip="По какому поставщику рассчитать пополнение склада">ⓘ</i></span>
-          <select id="supplier"></select>
-        </label>
-        <label class="field">
-          <span class="field-label">Горизонт планирования <i class="help" data-tip="На какой период вперёд планируем запас. Обычно = срок доставки от поставщика">ⓘ</i></span>
-          <select id="lead">
-            <option value="1">1 месяц</option>
-            <option value="1.5" selected>1,5 месяца</option>
-            <option value="2">2 месяца</option>
-            <option value="3">3 месяца</option>
-          </select>
-        </label>
-        <label class="field">
-          <span class="field-label">Бюджет на закуп <i class="help" data-tip="Ограничение по сумме. Система оставит самые срочные позиции в пределах бюджета. Пусто = без ограничения">ⓘ</i></span>
-          <input id="budget" type="number" value="0" step="500000" min="0" placeholder="без ограничения" style="width:160px" />
-        </label>
-        <div class="spacer"></div>
-        <button class="btn primary big" id="calc">Рассчитать заказ</button>
-      </div>
-      <div id="error" class="err" hidden style="margin-top:12px"></div>
-      <div id="loading" class="tag" hidden style="margin-top:12px">⏳ Считаем рекомендации…</div>
-    </section>
-
-    <!-- Ключевые показатели -->
-    <section class="card" id="kpiCard" hidden>
-      <div class="section-label">Итоги расчёта</div>
-      <div class="kpis" id="kpis"></div>
-    </section>
-
-    <!-- График спроса и прогноза -->
-    <section class="card" id="chartCard" hidden>
-      <div class="section-label">
-        Спрос и прогноз <i class="help" data-tip="История продаж (сплошная линия) и прогноз на будущее (пунктир). Серые зоны — месяцы, когда товара не было в наличии">ⓘ</i>
-      </div>
-      <div class="chart-head">
-        <div class="chart-title" id="chartTitle"></div>
-        <div class="legend">
-          <span><span class="dot"></span>продажи (факт)</span>
-          <span><span class="dot forecast"></span>прогноз</span>
-          <span><span class="dot stockout"></span>не было в наличии</span>
-        </div>
-      </div>
-      <svg class="chart" id="chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
-      <p class="tag" id="chartHint"></p>
-      <p class="tag">💡 Нажмите на любую строку в таблице ниже, чтобы увидеть её график и детали расчёта.</p>
-    </section>
-
-    <!-- What-if сценарии -->
-    <section class="card" id="whatifCard" hidden>
-      <div class="section-label">
-        Что если… <i class="help" data-tip="Как изменится потребность в закупке при разных условиях. Помогает подготовиться к рискам">ⓘ</i>
-      </div>
-      <p class="tag" style="margin-top:0">Сравните, как меняется закупка при разных условиях:</p>
-      <div class="seg" id="whatif"></div>
-      <div class="kpis" id="whatifKpis" style="margin-top:14px"></div>
-    </section>
-
-    <!-- Таблица заказов -->
-    <section class="card" id="tableCard" hidden>
-      <div class="section-label">
-        Рекомендованные заказы <i class="help" data-tip="Список того, что стоит заказать. Сгруппирован по поставщикам. Красный = срочно, жёлтый = скоро, зелёный = планово">ⓘ</i>
-      </div>
-      <div class="table-tools">
-        <input id="search" type="text" placeholder="🔍 Найти по артикулу или названию…" />
-        <label class="chk-label"><input type="checkbox" id="urgentOnly" /> Показать только срочные</label>
-        <div class="spacer"></div>
-        <button class="btn" id="export" title="Скачать список в Excel/CSV">⬇ Скачать список</button>
-        <button class="btn primary" id="approve" disabled title="Отметьте позиции галочками">Сформировать заказ (0)</button>
-      </div>
-      <div class="table-wrap">
-        <table id="table">
-          <thead>
-            <tr>
-              <th style="width:36px" title="Отметьте позиции для заказа">✓</th>
-              <th>Артикул</th>
-              <th>Наименование</th>
-              <th>Заказать, шт</th>
-              <th>Почему столько <i class="help" data-tip="Объяснение расчёта: спрос, сезонность, остаток, исключённые разовые продажи">ⓘ</i></th>
-              <th>Срочность</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <p class="tag" style="margin-top:12px">
-        ⚠️ Заказ НЕ отправляется поставщику автоматически — только после вашего подтверждения.
-      </p>
-    </section>
-  </main>
-
-  <!-- всплывающая подсказка -->
-  <div id="tooltip" class="tooltip" hidden></div>
-
-  <script src="app.js"></script>
-</body>
-</html>
+<header class="topbar"><div class="brand">Планирование заказов поставщикам</div><div class="top-right"><span id="status" class="status"></span><button id="theme" class="theme-btn">Тема</button></div></header>
+<main class="container">
+<div class="hint-banner">Рассчитайте потребность → проверьте данные и количество → сохраните черновик → утвердите → скачайте заказ. Отправки поставщику в этом сервисе нет.</div>
+<section class="card"><div class="section-label">Настройки расчёта</div>
+<div class="filters-bar">
+<label class="field">Поставщик<select id="supplier"></select></label>
+<label class="field">Категория<select id="category"><option value="">Все категории</option></select></label>
+<label class="field">Склад<select id="warehouse"><option value="">Все доступные</option></select></label>
+<label class="field">Срок поставки, мес.<input id="lead" type="number" min="0.1" max="11.5" step="0.1" value="1.5"></label>
+<label class="field">Страховой запас, мес.<input id="safety" type="number" min="0" max="12" step="0.1" value="0.5"></label>
+<label class="field">Бюджет, ₸ (0 — без лимита)<input id="budget" type="number" min="0" value="0"></label>
+<button id="calc" class="btn primary">Рассчитать заказ</button>
+</div>
+<details><summary>Доступ к серверу</summary><label>API-ключ, если настроен <input id="apiKey" type="password" autocomplete="off"></label><button id="connect" class="btn">Подключиться</button></details>
+<div id="error" class="err" role="alert" hidden></div><p id="loading" hidden>Расчёт…</p>
+</section>
+<section id="dataCard" class="card" hidden><div class="section-label">Данные и ограничения</div><p id="dataInfo"></p><ul id="warnings"></ul></section>
+<section id="kpiCard" class="card" hidden><div class="section-label">Итоги расчёта</div><div id="kpis" class="kpis"></div><p id="summary"></p></section>
+<section id="chartCard" class="card" hidden><div class="section-label">История и календарный прогноз</div><h3 id="chartTitle"></h3><svg id="chart" class="chart" viewBox="0 0 800 240" role="img" aria-label="График продаж и прогноза"></svg><p id="chartHint" class="tag"></p></section>
+<section id="tableCard" class="card" hidden>
+<div class="section-label">Рекомендации</div>
+<div class="table-tools"><input id="search" placeholder="Код, артикул или название"><label><input type="checkbox" id="urgentOnly"> Только срочные</label><button id="selectBudget" class="btn">Выбрать оценённые в бюджете</button><button id="clearSelection" class="btn">Снять выбор</button></div>
+<p id="selection"></p>
+<div class="table-wrap"><table id="table"><thead><tr><th>Выбор</th><th>Код 1С / артикул</th><th>Товар</th><th>Количество</th><th>Цена, ₸</th><th>Срочность / обоснование</th></tr></thead><tbody></tbody></table></div>
+<div class="table-tools"><button id="prevPage" class="btn">Назад</button><span id="pageInfo"></span><button id="nextPage" class="btn">Далее</button></div>
+<label>Комментарий к заказу <input id="note" maxlength="2000"></label><button id="saveDraft" class="btn primary" disabled>Сохранить черновик</button>
+<button id="whatifButton" class="btn">Сравнить сценарии</button><div id="whatifKpis"></div>
+</section>
+<section id="draftCard" class="card" hidden><div class="section-label">Заказ</div><p id="draftInfo"></p><div id="draftLines" class="table-wrap"></div>
+<div id="confirmation"><label>Ответственный сотрудник <input id="reviewer" maxlength="150"></label><p><label><input id="verified" type="checkbox"> Проверены остатки, сроки поступлений, единицы, цены и предупреждения. Подтверждаю выбранное количество.</label></p><button id="approve" class="btn primary">Утвердить заказ</button></div>
+<button id="export" class="btn" disabled>Скачать утверждённый CSV</button></section>
+<section class="card"><div class="section-label">Сохранённые заказы</div><button id="refreshOrders" class="btn">Обновить</button><div id="orders"></div></section>
+</main><script src="app.js"></script>
+</body></html>

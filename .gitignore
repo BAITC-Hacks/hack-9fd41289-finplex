@@ -14,3 +14,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 ~$*.xlsx
+backend/runtime/
+*.sqlite3
+*.sqlite3-*

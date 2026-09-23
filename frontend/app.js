@@ -1,272 +1,164 @@
-// Дашборд рекомендованных заказов. API относительный (Docker) или :8020 (локально).
-const API = (window.PLANNER_API !== undefined ? window.PLANNER_API
-  : (location.port === "3100" && location.hostname === "localhost" ? "http://localhost:8020" : "")
-).replace(/\/+$/, "");
-const $ = (id) => document.getElementById(id);
-const money = (n) => new Intl.NumberFormat("ru-RU").format(Math.round(n || 0));
-let LINES = [];
-
-// --- тема ---
-$("theme").addEventListener("click", () => {
-  const el = document.documentElement;
-  const dark = el.getAttribute("data-theme") === "dark";
-  el.setAttribute("data-theme", dark ? "light" : "dark");
-  $("theme").textContent = dark ? "🌙" : "☀️";
-  if (LINES.length) drawChart(LINES[0]);
-});
-
-// --- скрыть подсказку-инструкцию ---
-$("hintClose").addEventListener("click", () => { $("hintBanner").hidden = true; });
-
-// --- всплывающие подсказки (ⓘ) ---
-const tooltip = $("tooltip");
-document.addEventListener("mouseover", (e) => {
-  const el = e.target.closest(".help");
-  if (!el) return;
-  tooltip.textContent = el.getAttribute("data-tip") || "";
-  tooltip.hidden = false;
-  const r = el.getBoundingClientRect();
-  tooltip.style.left = Math.min(r.left, window.innerWidth - 280) + "px";
-  tooltip.style.top = (r.bottom + 6) + "px";
-});
-document.addEventListener("mouseout", (e) => {
-  if (e.target.closest(".help")) tooltip.hidden = true;
-});
-
-async function checkHealth() {
-  const s = $("status");
-  try {
-    await (await fetch(`${API}/health`)).json();
-    s.textContent = "Сервер на связи";
-    s.className = "status ok";
-  } catch {
-    s.textContent = "Нет связи с сервером";
-    s.className = "status bad";
+/* All imported text is rendered with textContent. Selection survives filtering/pages. */
+const API = (window.PLANNER_API || (location.port === '3100' ? `http://${location.hostname}:8020` : '')).replace(/\/+$/, '');
+const $ = id => document.getElementById(id);
+const fmt = n => n == null ? 'не указана' : new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 3}).format(n);
+let plan = null, draft = null, lines = [], page = 0, busy = false, optionsRun = 0, calculationRun = 0;
+const selected = new Set(), edits = new Map();
+const PAGE_SIZE = 100;
+function el(tag, text, cls) { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }
+function showError(error) { $('error').textContent = error.message || String(error); $('error').hidden = false; }
+async function api(path, body) {
+  const headers = {'X-API-Key': $('apiKey').value};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const response = await fetch(API + path, {method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body)});
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || `Ошибка ${response.status}`));
   }
+  return response;
 }
-
-async function loadSuppliers() {
+async function json(path, body) { return (await api(path, body)).json(); }
+async function guarded(fn) { $('error').hidden = true; try { await fn(); } catch (error) { showError(error); } }
+function params() { return {supplier: $('supplier').value, lead_time: Number($('lead').value), safety: Number($('safety').value), budget: Number($('budget').value), category: $('category').value || null, warehouse: $('warehouse').value || null}; }
+function fillOptions(id, values, title) { const options = values.map(v => {const o = el('option', v); o.value = v; return o;}); const first = el('option', title); first.value = ''; $(id).replaceChildren(first, ...options); }
+async function loadOptions() {
+  const run = ++optionsRun, supplier = $('supplier').value;
+  $('calc').disabled = true;
   try {
-    const d = await (await fetch(`${API}/api/suppliers`)).json();
-    const sel = $("supplier"); sel.innerHTML = "";
-    (d.suppliers || []).forEach(s => {
-      const o = document.createElement("option"); o.value = s.key; o.textContent = s.name; sel.appendChild(o);
-    });
-  } catch {}
+    const result = await json(`/api/options?supplier=${encodeURIComponent(supplier)}`);
+    if (run !== optionsRun) return;
+    fillOptions('category', result.categories, 'Все категории'); fillOptions('warehouse', result.warehouses, 'Все доступные');
+    $('lead').value = result.lead_time;
+    renderMetadata(result.metadata);
+  } finally { if (run === optionsRun) $('calc').disabled = false; }
 }
-
-async function calc() {
-  $("error").hidden = true;
-  $("loading").hidden = false;
-  const supplier = $("supplier").value || "systeme";
-  const lead = $("lead").value;
-  const budget = $("budget").value || 0;
+function renderMetadata(meta) {
+  $('dataCard').hidden = false; $('dataInfo').textContent = `Данные на ${meta.as_of}, версия ${meta.version}. Товаров: ${meta.products}. Источников: ${meta.sources.length}.`;
+  $('warnings').replaceChildren(...meta.warnings.map(w => el('li', w)));
+}
+async function connect() {
+  const result = await json('/api/suppliers');
+  $('supplier').replaceChildren(...result.suppliers.map(s => { const o = el('option', s.name); o.value = s.key; return o; }));
+  $('status').textContent = 'Сервер на связи'; $('status').className = 'status ok';
+  if (result.suppliers.length) await loadOptions();
+  else throw new Error('Нет полных наборов данных');
+  await loadOrders();
+}
+function invalidateDraft() { draft = null; $('draftCard').hidden = true; $('export').disabled = true; }
+function invalidatePlan() {
+  calculationRun++; plan = null; lines = []; selected.clear(); edits.clear(); invalidateDraft();
+  for (const id of ['tableCard','kpiCard','chartCard']) $(id).hidden = true;
+}
+async function calculate() {
+  if (busy) return;
+  const run = ++calculationRun;
+  busy = true; $('calc').disabled = true; $('loading').hidden = false;
   try {
-    const r = await fetch(`${API}/api/plan?supplier=${supplier}&lead_time=${lead}&budget=${budget}&limit=400`);
-    const d = await r.json();
-    $("loading").hidden = true;
-    if (!r.ok) { showError("Не удалось рассчитать. Попробуйте ещё раз или обратитесь к администратору."); return; }
-    render(d);
-    loadWhatif(supplier);
-  } catch {
-    $("loading").hidden = true;
-    showError("Нет связи с сервером расчёта. Проверьте, что сервис запущен.");
+    const result = await json('/api/plans', params());
+    if (run !== calculationRun) return;
+    plan = result; lines = result.lines; page = 0; selected.clear(); edits.clear(); invalidateDraft();
+    for (const l of lines) edits.set(l.code, {quantity: l.recommended_qty, unit_cost: l.cost});
+    renderMetadata(result.metadata);
+    $('kpiCard').hidden = false; $('tableCard').hidden = false;
+    $('kpis').replaceChildren(...[[result.orders_count, 'Позиций'], [result.deficit_count, 'Рисков дефицита (включая уже заказанные)'], [fmt(result.total_cost), 'Известная стоимость, ₸'], [result.unpriced_count, 'Без цены'], [result.within_budget, 'В бюджете']].map(([v,label]) => { const k = el('div', null, 'kpi'); k.append(el('div', v, 'v'), el('div', label, 'l')); return k; }));
+    $('summary').textContent = result.ai_summary;
+    $('whatifKpis').replaceChildren(); renderTable();
+    if (lines.length) drawChart(lines[0]); else $('chartCard').hidden = true;
+  } finally { busy = false; $('calc').disabled = false; $('loading').hidden = true; }
+}
+function selectionInfo() {
+  let total = 0, missing = 0, invalid = 0;
+  for (const code of selected) {
+    const e = edits.get(code), l = lines.find(x => x.code === code);
+    if (!(e.unit_cost > 0)) missing++;
+    else total += Math.round(e.quantity * e.unit_cost * 100) / 100;
+    if (!(e.quantity >= l.min_qty) || Math.abs(e.quantity / l.moq - Math.round(e.quantity / l.moq)) > 1e-7) invalid++;
   }
+  const over = plan && plan.parameters.budget > 0 && total > plan.parameters.budget;
+  $('selection').textContent = `Выбрано: ${selected.size}. Известная сумма: ${fmt(total)} ₸. Без цены: ${missing}. Нарушений партии: ${invalid}.${over ? ' Превышен бюджет.' : ''}`;
+  $('saveDraft').disabled = !selected.size || !!missing || !!invalid || over;
 }
-
-async function loadWhatif(supplier) {
-  try {
-    const d = await (await fetch(`${API}/api/whatif?supplier=${supplier}`)).json();
-    $("whatifCard").hidden = false;
-    const seg = $("whatif"); seg.innerHTML = "";
-    const kpis = $("whatifKpis");
-    d.scenarios.forEach((s, i) => {
-      const b = document.createElement("button");
-      b.textContent = s.title; if (i === 0) b.classList.add("active");
-      b.addEventListener("click", () => {
-        seg.querySelectorAll("button").forEach(x => x.classList.remove("active"));
-        b.classList.add("active");
-        kpis.innerHTML = `
-          <div class="kpi"><div class="v">${s.orders}</div><div class="l">Позиций к заказу</div></div>
-          <div class="kpi danger"><div class="v">⚠ ${s.deficit}</div><div class="l">Срочных</div></div>
-          <div class="kpi"><div class="v">${money(s.cost)} ₸</div><div class="l">Сумма закупки</div></div>`;
-      });
-      seg.appendChild(b);
-    });
-    seg.querySelector("button")?.click();
-  } catch {}
-}
-function showError(m){ const e=$("error"); e.textContent=m; e.hidden=false; }
-
-function render(d) {
-  LINES = d.lines || [];
-  // KPI с пояснениями простым языком
-  const budgetKpi = d.budget > 0
-    ? `<div class="kpi"><div class="v">${d.within_budget} из ${d.orders_count}</div><div class="l">Влезло в бюджет</div>
-         <div class="hint-mini">Остальные отложены — не хватило бюджета</div></div>`
-    : `<div class="kpi"><div class="v">${d.transfers}</div><div class="l">Можно взять с другого склада</div>
-         <div class="hint-mini">Не заказывать — переместить со своего склада</div></div>`;
-  $("kpiCard").hidden = false;
-  $("kpis").innerHTML = `
-    <div class="kpi"><div class="v">${d.orders_count}</div><div class="l">Позиций к заказу</div>
-      <div class="hint-mini">Столько товаров стоит пополнить</div></div>
-    <div class="kpi danger"><div class="v">⚠ ${d.deficit_count}</div><div class="l">Срочно — риск закончиться</div>
-      <div class="hint-mini">Остатка не хватит до следующей поставки</div></div>
-    <div class="kpi"><div class="v">${d.excess_count}</div><div class="l">Затоварено</div>
-      <div class="hint-mini">Запас избыточен — заказывать не нужно</div></div>
-    <div class="kpi"><div class="v">${money(d.total_cost)} ₸</div><div class="l">Сумма закупки</div>
-      <div class="hint-mini">Ориентировочная стоимость заказа</div></div>
-    <div class="kpi"><div class="v">${d.spike_items}</div><div class="l">Отсеяно разовых продаж</div>
-      <div class="hint-mini">Крупные разовые сделки не завышают заказ</div></div>
-    ${budgetKpi}`;
-
-  $("chartCard").hidden = false;
-  if (LINES.length) drawChart(LINES[0]);
-
-  $("tableCard").hidden = false;
-  drawTable();
-  updateApprove();
-}
-
-// --- SVG график: факт (сплошная) + прогноз (пунктир) + зона stockout ---
-function drawChart(line) {
-  const svg = $("chart");
-  const W = 800, H = 220, pad = 30;
-  const data = (line.monthly || []).map(Number);
-  $("chartTitle").textContent = line.name || line.code;
-  if (!data.length) { svg.innerHTML = ""; $("chartHint").textContent = ""; return; }
-
-  const seas = line.detail?.seasonal_demand_month || (data.reduce((a,b)=>a+b,0)/data.length);
-  const forecast = [seas, seas, seas]; // прогноз на 3 периода вперёд
-  const all = data.concat(forecast);
-  const max = Math.max(...all, 1);
-  const n = all.length;
-  const x = (i) => pad + (i * (W - 2*pad) / (n - 1));
-  const y = (v) => H - pad - (v * (H - 2*pad) / max);
-
-  const css = getComputedStyle(document.documentElement);
-  const cFact = css.getPropertyValue("--chart-fact").trim();
-  const cFore = css.getPropertyValue("--chart-forecast").trim();
-  const cSO = css.getPropertyValue("--stockout").trim();
-
-  // зоны stockout (месяцы с 0 продаж внутри активного периода)
-  let firstActive = data.findIndex(v => v > 0); if (firstActive < 0) firstActive = 0;
-  let soRects = "";
-  for (let i = firstActive; i < data.length; i++) {
-    if (data[i] === 0) {
-      soRects += `<rect x="${x(i)-6}" y="${pad}" width="12" height="${H-2*pad}" fill="${cSO}"/>`;
-    }
+function renderTable() {
+  const q = $('search').value.toLowerCase();
+  const filtered = lines.filter(l => (!$('urgentOnly').checked || l.urgency === 'Высокая') && (!q || `${l.code} ${l.article} ${l.name}`.toLowerCase().includes(q)));
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)); page = Math.min(page, pages - 1);
+  const tbody = $('table').querySelector('tbody'); tbody.replaceChildren();
+  for (const l of filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)) {
+    const row = el('tr'); const choose = el('input'); choose.type = 'checkbox'; choose.checked = selected.has(l.code); choose.setAttribute('aria-label', `Выбрать ${l.code}`);
+    choose.addEventListener('change', () => { choose.checked ? selected.add(l.code) : selected.delete(l.code); invalidateDraft(); selectionInfo(); });
+    const c1 = el('td'); c1.append(choose);
+    const code = el('td', `${l.code} / ${l.article || 'нет артикула'}`, 'mono');
+    const name = el('td', `${l.name} (${l.unit})`); const chart = el('button', 'График', 'btn'); chart.addEventListener('click', () => drawChart(l)); name.append(el('br'), chart);
+    const qtyCell = el('td'); const qty = el('input'); qty.type = 'number'; qty.min = l.min_qty; qty.step = l.moq; qty.value = edits.get(l.code).quantity; qty.setAttribute('aria-label', `Количество ${l.code}`);
+    qty.addEventListener('input', () => { edits.get(l.code).quantity = Number(qty.value); invalidateDraft(); selectionInfo(); });
+    qtyCell.append(qty, el('div', `Мин. ${fmt(l.min_qty)}, кратность ${fmt(l.moq)}`, 'tag'));
+    const costCell = el('td'); const price = el('input'); price.type = 'number'; price.min = .01; price.step = .01; price.value = edits.get(l.code).unit_cost ?? ''; price.setAttribute('aria-label', `Цена ${l.code}`);
+    price.addEventListener('input', () => { edits.get(l.code).unit_cost = price.value ? Number(price.value) : null; invalidateDraft(); selectionInfo(); }); costCell.append(price);
+    const detail = el('td'); detail.append(el('span', l.urgency, 'badge ' + (l.urgency === 'Высокая' ? 'high' : 'mid')));
+    if (!l.in_budget) detail.append(el('p', 'Не вошло в исходный бюджет / нет цены', 'tag'));
+    const exp = el('details'); exp.append(el('summary', 'Расчёт и предупреждения'), el('p', l.reason), el('p', `Остаток на ${l.stock_as_of}. Наличный: ${fmt(l.free_stock)}; путь: ${fmt(l.in_transit)}; зачтено: ${fmt(l.eligible_transit)}.`));
+    const warnings = el('ul'); warnings.append(...l.warnings.map(w => el('li', w))); exp.append(warnings); detail.append(exp);
+    row.append(c1, code, name, qtyCell, costCell, detail); tbody.append(row);
   }
-  const factPath = data.map((v,i)=>`${i?"L":"M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-  const foreStart = data.length - 1;
-  const forePath = [data[data.length-1], ...forecast]
-    .map((v,i)=>`${i?"L":"M"}${x(foreStart+i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-
-  svg.innerHTML = `${soRects}
-    <path d="${factPath}" fill="none" stroke="${cFact}" stroke-width="2"/>
-    <path d="${forePath}" fill="none" stroke="${cFore}" stroke-width="2" stroke-dasharray="5,4"/>`;
-  const soCount = data.slice(firstActive).filter(v=>v===0).length;
-  $("chartHint").textContent = soCount
-    ? `Затенённые зоны — ${soCount} мес. дефицита: спрос был занижен из-за отсутствия товара.`
-    : "Дефицита в истории не зафиксировано.";
+  $('pageInfo').textContent = `Страница ${page + 1}/${pages}. Найдено ${filtered.length} из ${lines.length}. Выбор сохраняется между страницами.`;
+  $('prevPage').disabled = page === 0; $('nextPage').disabled = page + 1 === pages; selectionInfo();
 }
-
-// --- таблица по группам поставщиков ---
-const collapsed = new Set();
-function drawTable() {
-  const q = ($("search").value || "").toLowerCase();
-  const urgentOnly = $("urgentOnly").checked;
-  const rows = LINES
-    .filter(l => !urgentOnly || l.urgency === "Высокая")
-    .filter(l => !q || (l.name + l.code).toLowerCase().includes(q));
-
-  // группировка по поставщику
-  const groups = {};
-  rows.forEach(l => (groups[l.supplier] = groups[l.supplier] || []).push(l));
-
-  const tbody = $("table").querySelector("tbody");
-  tbody.innerHTML = "";
-  Object.entries(groups).forEach(([supplier, items]) => {
-    const gid = "g_" + supplier.replace(/\W/g, "");
-    const isCol = collapsed.has(supplier);
-    const gr = document.createElement("tr"); gr.className = "group-row";
-    gr.innerHTML = `<td colspan="6"><span class="caret">${isCol?"▶":"▼"}</span>
-      Поставщик: ${supplier} · ${items.length} поз. · на ${money(items.reduce((a,l)=>a+l.order_cost,0))} ₸</td>`;
-    gr.addEventListener("click", () => { isCol?collapsed.delete(supplier):collapsed.add(supplier); drawTable(); });
-    tbody.appendChild(gr);
-    if (isCol) return;
-
-    items.forEach((l) => {
-      const idx = LINES.indexOf(l);
-      const tr = document.createElement("tr"); tr.className = "row-main";
-      if (l.in_budget === false) tr.classList.add("approved"); // приглушить вне бюджета
-      const badge = l.urgency==="Высокая"?"high":l.urgency==="Средняя"?"mid":"low";
-      const transfer = l.transfer_from
-        ? ` <span class="badge low">↺ со склада «${l.transfer_from}» ${Math.round(l.transfer_qty)}</span>` : "";
-      const qtyCell = l.recommended_qty > 0
-        ? `<td class="qty">${Math.round(l.recommended_qty)}</td>`
-        : `<td class="qty" style="color:var(--muted)">0 (перемещение)</td>`;
-      tr.innerHTML = `
-        <td><input type="checkbox" class="chk" data-i="${idx}"></td>
-        <td class="mono">${l.code}</td>
-        <td>${l.name}</td>
-        ${qtyCell}
-        <td class="tag">${l.reason_tag}${transfer}</td>
-        <td><span class="badge ${badge}">${l.urgency}</span></td>`;
-      tbody.appendChild(tr);
-
-      const dr = document.createElement("tr"); dr.className = "row-detail"; dr.hidden = true;
-      const d = l.detail || {};
-      dr.innerHTML = `<td></td><td colspan="5"><div class="detail-grid">
-        <div>Продаётся в среднем: <b>${Math.round(d.base_demand_month)} шт/мес</b></div>
-        <div>Прогноз с учётом сезона: <b>${Math.round(d.seasonal_demand_month)} шт/мес</b></div>
-        <div>Сейчас на складе: <b>${Math.round(d.free_stock)} шт</b></div>
-        <div>Уже едет (в пути): <b>${Math.round(d.in_transit)} шт</b></div>
-        <div>Нужный запас: <b>${Math.round(d.target_stock)} шт</b></div>
-        <div>Хватит на: <b>${d.coverage_months} мес</b></div>
-        <div>Отсеяно разовых продаж: <b>${Math.round(d.spike_removed_units)} шт</b></div>
-        <div>Добавлено за дефицит: <b>+${Math.round(d.stockout_adj_units)} шт</b></div>
-        <div>Мин. партия заказа: <b>${d.moq}</b></div>
-      </div><div class="tag" style="margin-top:6px">📝 ${l.reason}</div></td>`;
-      tbody.appendChild(dr);
-
-      // клик по строке — детали; клик по чекбоксу — не разворачивать график
-      tr.addEventListener("click", (e) => {
-        if (e.target.classList.contains("chk")) return;
-        dr.hidden = !dr.hidden;
-        drawChart(l); // показать график по выбранной позиции
-      });
-    });
-  });
-
-  tbody.querySelectorAll(".chk").forEach(c => c.addEventListener("change", updateApprove));
+function drawChart(l) {
+  $('chartCard').hidden = false; $('chartTitle').textContent = l.name;
+  const svg = $('chart'); svg.replaceChildren();
+  const future = l.forecast.filter((v,i) => l.forecast_periods[i] > l.periods[l.periods.length - 1]);
+  const data = l.monthly, all = data.concat(future), max = Math.max(...all, 1), n = all.length;
+  const x = i => 32 + i * 735 / Math.max(1,n-1), y = v => 202 - v / max * 160;
+  function node(tag, attrs) { const e = document.createElementNS('http://www.w3.org/2000/svg',tag); for (const [k,v] of Object.entries(attrs)) e.setAttribute(k,v); svg.append(e); return e; }
+  l.periods.forEach((p,i) => { if (l.confirmed_stockout.includes(p)) node('rect',{x:x(i)-5,y:25,width:10,height:177,fill:'#d4a96a',opacity:.4}); });
+  node('path',{d:data.map((v,i)=>`${i?'L':'M'}${x(i)},${y(v)}`).join(' '),fill:'none',stroke:'#3977db','stroke-width':2});
+  const clean = l.cleaned_monthly; node('path',{d:clean.map((v,i)=>`${i?'L':'M'}${x(i)},${y(v)}`).join(' '),fill:'none',stroke:'#708074','stroke-width':1});
+  const f = [data[data.length-1],...future]; node('path',{d:f.map((v,i)=>`${i?'L':'M'}${x(data.length-1+i)},${y(v)}`).join(' '),fill:'none',stroke:'#c47333','stroke-width':2,'stroke-dasharray':'5 4'});
+  node('text',{x:32,y:226,fill:'currentColor','font-size':12}).textContent = l.periods[0];
+  node('text',{x:640,y:226,fill:'currentColor','font-size':12}).textContent = l.forecast_periods.at(-1);
+  $('chartHint').textContent = 'Синий — факт, серый — очищенный/восстановленный спрос, пунктир — календарный прогноз. Выделены только подтверждённые stockout. Неполный последний месяц не используется для обучения.';
 }
-
-function updateApprove() {
-  const n = $("table").querySelectorAll(".chk:checked").length;
-  const btn = $("approve");
-  btn.textContent = `Сформировать заказ (${n})`;
-  btn.disabled = n === 0;
+function showDraft(value) {
+  draft = value; $('draftCard').hidden = false; $('verified').checked = false;
+  $('draftInfo').textContent = `Заказ ${value.id}, ${value.status === 'approved' ? 'утверждён' : 'черновик'}. Позиций: ${value.lines.length}, сумма ${fmt(value.total_cost)} ₸. ${value.note || ''}`;
+  const table = el('table'), head = el('tr'); for (const label of ['Код / артикул','Товар','Количество','Цена','Сумма']) head.append(el('th',label)); table.append(head);
+  for (const l of value.lines) {const r = el('tr'); for (const v of [`${l.code} / ${l.article}`,l.name,`${fmt(l.quantity)} ${l.unit}`,fmt(l.cost),fmt(l.order_cost)]) r.append(el('td',v)); table.append(r);}
+  $('draftLines').replaceChildren(table); $('confirmation').hidden = value.status === 'approved'; $('export').disabled = value.status !== 'approved';
 }
-$("approve").addEventListener("click", () => {
-  const n = $("table").querySelectorAll(".chk:checked").length;
-  alert(`Заказ сформирован по ${n} позиц. \n\nВажно: заказ НЕ отправлен поставщику автоматически. ` +
-        `Проверьте список и отправьте вручную через вашу систему.`);
-});
-
-function exportCsv() {
-  if (!LINES.length) return;
-  const head = ["Артикул","Поставщик","Количество","Обоснование","Срочность"];
-  const rows = LINES.map(l => [l.code, `"${l.supplier}"`, Math.round(l.recommended_qty),
-    `"${l.reason.replace(/"/g,'""')}"`, l.urgency].join(","));
-  const blob = new Blob(["\uFEFF"+[head.join(","),...rows].join("\n")], {type:"text/csv;charset=utf-8"});
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "orders.csv"; a.click();
+async function saveDraft() {
+  const body = {plan_id:plan.plan_id, lines:[...selected].map(code => ({code,...edits.get(code)})),note:$('note').value};
+  showDraft(await json('/api/orders',body)); await loadOrders();
 }
-
-$("calc").addEventListener("click", calc);
-$("export").addEventListener("click", exportCsv);
-$("search").addEventListener("input", drawTable);
-$("urgentOnly").addEventListener("change", drawTable);
-
-checkHealth();
-loadSuppliers();
+async function approve() {
+  if (!draft) throw new Error('Сначала сохраните черновик');
+  showDraft(await json(`/api/orders/${draft.id}/approve`,{reviewer:$('reviewer').value,verified_inputs:$('verified').checked})); await loadOrders();
+}
+async function download() {
+  if (!draft || draft.status !== 'approved') return;
+  const blob = await (await api(`/api/orders/${draft.id}/export`)).blob(); const url = URL.createObjectURL(blob);
+  const a = el('a'); a.href=url; a.download=`order-${draft.id}.csv`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function loadOrders() {
+  const result = await json('/api/orders'); $('orders').replaceChildren(...result.orders.map(o => {const b=el('button',`${o.status === 'approved' ? 'Утверждён' : 'Черновик'} · ${fmt(o.total_cost)} ₸ · ${o.created_at}`, 'btn'); b.addEventListener('click',()=>guarded(async()=>showDraft(await json(`/api/orders/${o.id}`)))); return b;}));
+}
+async function whatif() {
+  if (!plan) return; $('whatifButton').disabled = true;
+  const snapshot = plan.plan_id;
+  try {const result=await json('/api/whatif',plan.parameters); if(plan?.plan_id !== snapshot) return; $('whatifKpis').replaceChildren(...result.scenarios.map(s=>el('p',`${s.title}: ${s.orders} поз., известная сумма ${fmt(s.cost)} ₸, без цены ${s.unpriced_count}, рисков ${s.deficit}, в бюджете ${s.within_budget}.`)));}
+  finally {$('whatifButton').disabled=false;}
+}
+$('connect').addEventListener('click',()=>guarded(connect));
+$('supplier').addEventListener('change',()=>{invalidatePlan();guarded(loadOptions);});
+for (const id of ['category','warehouse','lead','safety','budget']) $(id).addEventListener('change',invalidatePlan);
+$('calc').addEventListener('click',()=>guarded(calculate));
+$('saveDraft').addEventListener('click',()=>guarded(saveDraft));
+$('approve').addEventListener('click',()=>guarded(approve));
+$('export').addEventListener('click',()=>guarded(download));
+$('refreshOrders').addEventListener('click',()=>guarded(loadOrders));
+$('whatifButton').addEventListener('click',()=>guarded(whatif));
+for (const id of ['search','urgentOnly']) $(id).addEventListener('input',()=>{page=0;renderTable();});
+$('prevPage').addEventListener('click',()=>{page--;renderTable();}); $('nextPage').addEventListener('click',()=>{page++;renderTable();});
+$('selectBudget').addEventListener('click',()=>{for(const l of lines) if(l.in_budget && edits.get(l.code).unit_cost > 0) selected.add(l.code); invalidateDraft();renderTable();});
+$('clearSelection').addEventListener('click',()=>{selected.clear();invalidateDraft();renderTable();});
+$('theme').addEventListener('click',()=>document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+guarded(connect);

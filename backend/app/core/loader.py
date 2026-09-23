@@ -1,108 +1,208 @@
-"""Загрузчик данных партнёра (ekt.kz): витрина продаж/остатков, история, MOQ.
+"""Validated adapters for partner Excel exports; missing inventory is not zero."""
 
-Данные — выгрузки 1С в Excel с многоуровневыми шапками. Загрузчик приводит их
-к чистым таблицам для движка расчёта. Работает с брендом Systeme Electric
-(богатая витрина TDSheet), структура обобщаема на ИЭК.
-"""
 from __future__ import annotations
 
+import math
+import re
 from pathlib import Path
 
 import pandas as pd
 
-MONTHS_2026 = [
-    "Январь 2026 г.", "Февраль 2026 г.", "Март 2026 г.", "Апрель 2026 г.",
-    "Май 2026 г.", "Июнь 2026 г.", "Июль 2026 г.", "Август 2026 г.", "Сентябрь 2026 г.",
-]
-MONTHS_2025 = [
-    "Январь 2025 г.", "Февраль 2025 г.", "Март 2025 г.", "Апрель 2025 г.",
-    "Май 2025 г.", "Июнь 2025 г.", "Июль 2025 г.", "Август 2025 г.",
-    "Сентябрь 2025 г.", "Октябрь 2025 г.", "Ноябрь 2025 г.", "Декабрь 2025 г.",
-]
+MONTH_NAMES = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
 
 
-def _num(v, default=0.0) -> float:
-    """Безопасное число из ячейки 1С (строки, пробелы, запятые)."""
-    if v is None or (isinstance(v, float) and pd.isna(v)):
-        return default
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).strip().replace("\xa0", "").replace(" ", "").replace(",", ".")
-    if not s or s in ("-", "nan"):
+def _num(value, default=0.0):
+    if pd.isna(value) or str(value).strip() in ("", "-"):
         return default
     try:
-        return float(s)
-    except ValueError:
-        return default
+        result = float(str(value).replace("\xa0", "").replace(" ", "").replace(",", "."))
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Некорректное число: {value!r}") from exc
+    if not math.isfinite(result):
+        raise ValueError("Число должно быть конечным")
+    return result
 
 
-def load_showcase(path: Path) -> pd.DataFrame:
-    """Витрина TDSheet: по артикулу — помесячные продажи, ср.мес, рост, сезонность,
-    свободный остаток, в пути. Заголовки во 2-й строке (header=1).
-    Возвращает нормализованный DataFrame по товарам.
-    """
-    df = pd.read_excel(path, sheet_name="TDSheet", header=1)
-    df = df[df["Код 1с"].notna() & (df["Код 1с"].astype(str).str.strip() != "")]
+def month_key(value):
+    text = str(value).lower().strip()
+    match = re.search(r"(20\d{2})", text)
+    if not match:
+        return None
+    for index, name in enumerate(MONTH_NAMES, 1):
+        if text.startswith(name) or (index == 5 and text.startswith("мая")):
+            return f"{match[1]}-{index:02d}"
+    return None
 
-    out = pd.DataFrame()
-    out["code"] = df["Код 1с"].astype(str).str.strip()
-    out["article"] = df.get("Артикул поставщика", "").astype(str).str.strip()
-    out["name"] = df.get("Наименование", "").astype(str).str.strip()
-    out["category"] = df.get("Категория 2026", "").astype(str).str.strip()
-    out["cost"] = df.get("СС реал", 0).map(_num)
 
-    # Готовые метрики партнёра (используем как эталон/фолбэк)
-    out["avg_month_12"] = df.get("   Ср мес за последние 12 мес", df.get("Ср мес за последние 12 мес", 0)).map(_num)
-    out["growth_coef"] = df.get("Кэф. Роста", 1).map(_num)
-    out["season_coef"] = df.get("Кэф. Сез-ти", 1).map(_num)
-    out["free_stock"] = df.get("Свободный остаток", 0).map(_num)
-    out["in_transit"] = df.get("СЭ в пути 24.09", 0).map(_num)
+def table(path: Path, required: str, sheet=0):
+    raw = pd.read_excel(path, sheet_name=sheet, header=None)
+    for index, row in raw.head(8).iterrows():
+        names = [str(x).strip() for x in row]
+        if required in names:
+            result = raw.iloc[index + 1 :].copy()
+            result.columns = names
+            return result
+    raise ValueError(f"{path.name}: не найден заголовок {required}")
 
-    # Остатки по складам (для перераспределения между складами, PRD 6.3.1)
-    out["wh_vitrina"] = df.get("Витрина", 0).map(_num)
-    out["wh_rc"] = df.get("РЦ ЕКТ  Рыскулова", df.get("РЦ ЕКТ Рыскулова", 0)).map(_num)
-    out["wh_retail"] = df.get("Розничный склад", 0).map(_num)
 
-    # Помесячные продажи 2025-2026 для собственного расчёта сезонности
-    for m in MONTHS_2025 + MONTHS_2026:
-        if m in df.columns:
-            out[f"m_{m}"] = df[m].map(_num)
+def unique_codes(df, column, path):
+    df = df.drop_duplicates()
+    df = df[df[column].notna()].copy()
+    df["code"] = df[column].astype(str).str.strip()
+    df = df[~df.code.isin(["", "Итого", "nan"])]
+    if df.code.duplicated().any():
+        raise ValueError(f"{path.name}: повторяющиеся коды товара")
+    return df
 
+
+def load_showcase(path: Path):
+    df = unique_codes(table(path, "Код 1с", "TDSheet"), "Код 1с", path)
+    out = pd.DataFrame({"code": df.code})
+    for target, source in [("article", "Артикул поставщика"), ("name", "Наименование"), ("category", "Категория 2026")]:
+        out[target] = df[source].fillna("").astype(str).str.strip()
+    for target, source in [("cost", "СС реал"), ("growth_coef", "Кэф. Роста"), ("free_stock", "Свободный остаток")]:
+        if source not in df:
+            raise ValueError(f"{path.name}: отсутствует {source}")
+        out[target] = df[source].map(lambda x: _num(x, None))
+    transit = [c for c in df if "в пути" in c.lower()]
+    if len(transit) != 1:
+        raise ValueError(f"{path.name}: неоднозначная колонка товара в пути")
+    out["in_transit"] = df[transit[0]].map(_num)
+    out["transit_lots"] = out.in_transit.map(lambda q: [{"qty": q, "eta": None}] if q else [])
+    for col in df:
+        period = month_key(col)
+        if period:
+            out[f"m_{period}"] = df[col].map(_num)
     return out.reset_index(drop=True)
 
 
-def load_sales_history(path: Path) -> pd.DataFrame:
-    """Построчная история продаж (Динамика): для детекта разовых всплесков.
-    Количество отрицательное = расход (продажа). Возвращает: date, code, qty (положит.).
-    """
+def load_monthly(path: Path, prefix="m_"):
+    df = unique_codes(table(path, "Номенклатура.Код"), "Номенклатура.Код", path)
+    out = pd.DataFrame({"code": df.code, "name": df["Номенклатура"].astype(str).str.strip()})
+    for source, target in [("Артикул", "article"), ("Ед.", "unit"), ("Ед.изм", "unit")]:
+        if source in df:
+            out[target] = df[source].fillna("").astype(str).str.strip()
+    for col in df:
+        period = month_key(col)
+        if period:
+            out[prefix + period] = df[col].map(lambda v: _num(v, None if prefix == "s_" else 0))
+    if not any(c.startswith(prefix) for c in out):
+        raise ValueError(f"{path.name}: отсутствуют периоды")
+    return out.reset_index(drop=True)
+
+
+def load_sales_history(path: Path):
     df = pd.read_excel(path)
-    df = df[["Дата", "Код", "Количество"]].copy()
-    df.columns = ["date", "code", "qty"]
-    df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
-    df["code"] = df["code"].astype(str).str.strip()
-    df["qty"] = df["qty"].map(_num)
-    # продажи = отрицательные строки (расход), берём модуль
-    df = df[df["qty"] < 0].copy()
-    df["qty"] = df["qty"].abs()
-    df = df[df["date"].notna()]
-    return df.reset_index(drop=True)
+    required = {"Дата", "Код", "Количество", "Документ", "Склад"}
+    if not required.issubset(df):
+        raise ValueError(f"{path.name}: отсутствуют {sorted(required - set(df))}")
+    result = pd.DataFrame(
+        {
+            "date": pd.to_datetime(df["Дата"], dayfirst=True, format="mixed", errors="coerce"),
+            "code": df["Код"].fillna("").astype(str).str.strip(),
+            "qty": df["Количество"].map(_num),
+            "document": df["Документ"].fillna("").astype(str),
+            "warehouse": df["Склад"].fillna("").astype(str),
+            "unit": df.get("Ед.", pd.Series("", index=df.index)).fillna("").astype(str),
+        }
+    )
+    expense = result.document.str.startswith("Расходная накладная")
+    returns = result.document.str.lower().str.contains("возврат")
+    result.loc[returns, "qty"] = -result.loc[returns, "qty"].abs()
+    valid = (expense | returns) & result.date.notna() & result.code.ne("")
+    result["operation"] = "sale"
+    result.loc[result.qty < 0, "operation"] = "return_or_correction"
+    if "customer_id" in df:
+        result["customer_id"] = df["customer_id"].fillna("").astype(str)
+    result = result[valid].copy()
+    result.attrs["quality"] = {
+        "input_rows": len(df),
+        "accepted_rows": len(result),
+        "rejected_rows": int((~valid).sum()),
+        "correction_rows": int((result.qty < 0).sum()),
+        "customer_ids_available": "customer_id" in result,
+    }
+    return result.reset_index(drop=True)
 
 
-def load_moq(path: Path) -> dict[str, float]:
-    """MOQ (минимальная партия) по коду 1С. header=1."""
-    try:
-        df = pd.read_excel(path, header=1)
-    except Exception:
-        return {}
-    # ищем колонку с кодом и с кратностью/мин.партией
-    code_col = next((c for c in df.columns if "Код" in str(c)), None)
-    qty_col = next((c for c in df.columns if "ратн" in str(c) or "Мин" in str(c)), None)
-    if not code_col or not qty_col:
-        return {}
-    moq = {}
-    for _, r in df.iterrows():
-        code = str(r[code_col]).strip()
-        val = _num(r[qty_col], 1)
-        if code and code != "nan" and val > 0:
-            moq[code] = val
-    return moq
+def load_moq(path: Path):
+    raw = pd.read_excel(path, header=None, nrows=8)
+    key = "Номенклатура.Код" if raw.isin(["Номенклатура.Код"]).any().any() else "Код 1с"
+    df = table(path, key)
+    pack = next((c for c in df if "ратность" in c), None)
+    minimum = next((c for c in df if "Мин" in c), None)
+    if not pack and not minimum:
+        raise ValueError(f"{path.name}: нет кратности или минимальной партии")
+    # Duplicate display names for the same SKU are harmless only when rules agree.
+    df = df[[key] + [c for c in (pack, minimum) if c]].drop_duplicates()
+    df = unique_codes(df, key, path)
+    rules = {}
+    for _, row in df.iterrows():
+        step = _num(row[pack], 1) if pack else 1
+        qty = _num(row[minimum], 1) if minimum else step
+        if step <= 0 or qty <= 0:
+            raise ValueError(f"{path.name}: неположительная партия для {row.code}")
+        rules[row.code] = {"pack_size": step, "min_qty": qty}
+    return rules
+
+
+def load_transit_iek(path: Path):
+    df = table(path, "Код 1с")
+    df = df[df["Код 1с"].notna()].copy()
+    df["code"] = df["Код 1с"].astype(str).str.strip()
+    df["Артикул ИЭК"] = df["Артикул ИЭК"].fillna("").astype(str).str.strip()
+    # Repeated catalogue rows may differ in display name/whitespace. Coalesce each
+    # shipment column, never sum duplicate copies of the same shipment.
+    merged = []
+    for code, group in df.groupby("code", sort=False):
+        row = group.iloc[0].copy()
+        if group["Артикул ИЭК"].nunique() > 1:
+            raise ValueError(f"{path.name}: конфликт артикулов {code}")
+        for column in df:
+            if "поступление до" in column:
+                values = group[column].map(_num)
+                if values[values != 0].nunique() > 1:
+                    raise ValueError(f"{path.name}: конфликт количества в пути {code}")
+                row[column] = values.max()
+        merged.append(row)
+    df = pd.DataFrame(merged)
+    rows = []
+    for _, row in df.iterrows():
+        lots = []
+        for column in df:
+            match = re.search(r"поступление до (\d{2}\.\d{2}\.\d{4})", column)
+            if match:
+                qty = _num(row[column])
+                if qty < 0:
+                    raise ValueError("Отрицательное количество в пути")
+                if qty:
+                    lots.append({"qty": qty, "eta": pd.to_datetime(match[1], dayfirst=True).date().isoformat()})
+        rows.append(
+            {
+                "code": row.code,
+                "article": str(row["Артикул ИЭК"]),
+                "name": str(row["Наименование"]),
+                "transit_lots": lots,
+                "in_transit": sum(x["qty"] for x in lots),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def load_seasonality(path: Path, as_of):
+    raw = pd.read_excel(path, header=None)
+    profiles = []
+    for _, row in raw.iterrows():
+        try:
+            year = int(row.iloc[0])
+        except (ValueError, TypeError):
+            continue
+        if not 2000 <= year < pd.Timestamp(as_of).year:
+            continue
+        values = [_num(v) for v in row.iloc[1:13]]
+        mean = sum(values) / 12
+        if mean > 0:
+            profiles.append([v / mean for v in values])
+    if not profiles:
+        raise ValueError(f"{path.name}: нет полного исторического года сезонности")
+    return [sum(p[i] for p in profiles) / len(profiles) for i in range(12)]
