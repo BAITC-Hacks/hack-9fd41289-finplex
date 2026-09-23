@@ -69,7 +69,7 @@ class PlanInput(StrictModel):
 class ItemInput(StrictModel):
     code: str
     quantity: float = Field(gt=0, le=1e12)
-    unit_cost: float | None = Field(None, gt=0, le=1e12)
+    unit_cost: float | None = Field(None, ge=1, le=1e12)
 
 
 class DraftInput(StrictModel):

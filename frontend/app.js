@@ -84,12 +84,12 @@ function selectionInfo() {
   let total = 0, missing = 0, invalid = 0;
   for (const code of selected) {
     const e = edits.get(code), l = lines.find(x => x.code === code);
-    if (!(e.unit_cost > 0)) missing++;
+    if (!(e.unit_cost >= 1)) missing++;
     else total += Math.round(e.quantity * e.unit_cost * 100) / 100;
     if (!(e.quantity >= l.min_qty) || Math.abs(e.quantity / l.moq - Math.round(e.quantity / l.moq)) > 1e-7) invalid++;
   }
   const over = plan && plan.parameters.budget > 0 && total > plan.parameters.budget;
-  $('selection').textContent = !selected.size ? 'Отметьте товары галочками слева. Затем нажмите «Перейти к проверке».' : `Выбрано ${selected.size} · Сумма с известными ценами: ${fmt(total)} ₸.${missing ? ` Укажите цену для ${missing} позиций.` : ''}${invalid ? ` Исправьте количество для ${invalid} позиций: соблюдайте минимум и кратность.` : ''}${over ? ' Превышен бюджет.' : ''}`;
+  $('selection').textContent = !selected.size ? 'Отметьте товары галочками слева. Затем нажмите «Перейти к проверке».' : `Выбрано ${selected.size} · Сумма с известными ценами: ${fmt(total)} ₸.${missing ? ` Укажите цену не ниже 1 ₸ для ${missing} позиций.` : ''}${invalid ? ` Исправьте количество для ${invalid} позиций: соблюдайте минимум и кратность.` : ''}${over ? ' Превышен бюджет.' : ''}`;
   $('saveDraft').disabled = !selected.size || !!missing || !!invalid || over;
 }
 function renderTable() {
@@ -106,13 +106,15 @@ function renderTable() {
     const qtyCell = el('td'); const qty = el('input'); qty.type = 'number'; qty.min = l.min_qty; qty.step = l.moq; qty.value = edits.get(l.code).quantity; qty.setAttribute('aria-label', `Количество ${l.code}`);
     qty.addEventListener('input', () => { edits.get(l.code).quantity = Number(qty.value); invalidateDraft(); selectionInfo(); });
     qtyCell.append(qty, el('div', `Мин. ${fmt(l.min_qty)}, кратность ${fmt(l.moq)}`, 'tag'));
-    const costCell = el('td'); const price = el('input'); price.type = 'number'; price.min = .01; price.step = .01; price.value = edits.get(l.code).unit_cost ?? ''; price.placeholder='Укажите цену'; price.setAttribute('aria-label', `Цена ${l.code}`);
+    const costCell = el('td'); const price = el('input'); price.type = 'number'; price.min = 1; price.step = 1; price.value = edits.get(l.code).unit_cost ?? ''; price.placeholder='От 1 ₸'; price.title='Минимум 1 ₸. Стрелки изменяют цену на 1 ₸.'; price.setAttribute('aria-label', `Цена ${l.code}`);
     price.addEventListener('input', () => { edits.get(l.code).unit_cost = price.value ? Number(price.value) : null; invalidateDraft(); selectionInfo(); }); costCell.append(price);
     const detail = el('td'); detail.append(el('span', l.urgency, 'badge ' + (l.urgency === 'Высокая' ? 'high' : 'mid')));
     if (!l.in_budget) detail.append(el('p', 'Не вошло в исходный бюджет / нет цены', 'tag'));
     const exp = el('details'); exp.append(el('summary', 'Расчёт и предупреждения'), el('p', l.reason), el('p', `Остаток на ${l.stock_as_of}. Наличный: ${fmt(l.free_stock)}; путь: ${fmt(l.in_transit)}; зачтено: ${fmt(l.eligible_transit)}.`));
     const warnings = el('ul'); warnings.append(...l.warnings.map(w => el('li', w))); exp.append(warnings); detail.append(exp);
-    row.append(c1, code, name, qtyCell, costCell, detail); tbody.append(row);
+    const cells = [c1, code, name, qtyCell, costCell, detail];
+    cells.forEach((cell,i) => cell.setAttribute('data-label', ['В заказ','Код / артикул','Товар','Количество','Цена за единицу, ₸','Обоснование'][i]));
+    row.append(...cells); tbody.append(row);
   }
   if (!filtered.length) {const row=el('tr'), cell=el('td',lines.length ? 'По этим условиям товаров нет. Измените поиск или снимите фильтр срочности.' : 'По этим данным пополнение не требуется. Проверьте дату остатков и предупреждения.'); cell.colSpan=6;row.append(cell);tbody.append(row);}
   $('pageInfo').textContent = `Страница ${page + 1}/${pages}. Найдено ${filtered.length} из ${lines.length}. Выбор сохраняется между страницами.`;
@@ -193,7 +195,7 @@ $('refreshOrders').addEventListener('click',()=>guarded(loadOrders));
 $('whatifButton').addEventListener('click',()=>guarded(whatif));
 for (const id of ['search','urgentOnly']) $(id).addEventListener('input',()=>{page=0;renderTable();});
 $('prevPage').addEventListener('click',()=>{page--;renderTable();}); $('nextPage').addEventListener('click',()=>{page++;renderTable();});
-$('selectBudget').addEventListener('click',()=>{for(const l of lines) if(l.in_budget && edits.get(l.code).unit_cost > 0) selected.add(l.code); invalidateDraft();renderTable();});
+$('selectBudget').addEventListener('click',()=>{for(const l of lines) if(l.in_budget && edits.get(l.code).unit_cost >= 1) selected.add(l.code); invalidateDraft();renderTable();});
 $('clearSelection').addEventListener('click',()=>{selected.clear();invalidateDraft();renderTable();});
 $('theme').addEventListener('click',()=>document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 guarded(connect);

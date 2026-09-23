@@ -190,3 +190,22 @@ input[type=search] { flex:1; min-width:240px; min-height:42px; }
 :focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
 @media(max-width:640px) { .container { padding:12px; } .card { padding:16px; } .topbar { flex-wrap:wrap; gap:12px; } .top-right { flex-wrap:wrap; } .section-heading { flex-direction:column; } .steps { gap:8px; flex-direction:column; } .field { flex-basis:100%; } h1 { font-size:28px; } }
 @media(prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } }
+/* On phones recommendations become editable product cards. */
+@media(max-width:640px) {
+  #table, #table tbody { display:block; min-width:0; width:100%; }
+  #table thead { display:none; }
+  #table tbody tr { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); margin:12px 0; border:1px solid var(--border); border-radius:12px; padding:12px; gap:12px; background:var(--surface-2); }
+  #table td { display:block; padding:0; border:0; min-width:0; overflow-wrap:anywhere; }
+  #table td::before { content:attr(data-label); display:block; font-size:12px; color:var(--muted); margin-bottom:5px; }
+  #table td:nth-child(2), #table td:nth-child(3), #table td:nth-child(6), #table td[colspan] { grid-column:1 / -1; }
+  #table td:first-child { grid-column:1 / -1; display:flex; gap:12px; align-items:center; }
+  #table td input[type=number] { width:100%; min-height:44px; font-size:16px; }
+  .table-tools { align-items:stretch; }
+  .table-tools input[type=search] { min-width:0; width:100%; flex-basis:100%; font-size:16px; }
+  .review-bar { padding:14px; } .review-bar .btn { width:100%; }
+  .order-item { white-space:normal; overflow-wrap:anywhere; line-height:1.6; }
+  .top-right { width:100%; gap:8px 14px; }
+  .btn, .theme-btn { min-height:44px; }
+  input, select { font-size:16px!important; }
+  .pagination span { flex-basis:100%; order:3; }
+}

@@ -68,8 +68,8 @@ class Store:
             price = Decimal(str(price_value))
             if not qty.is_finite() or qty <= 0 or qty < minimum or qty % step != 0:
                 raise ValueError(f"{code}: минимум {minimum}, кратность {step}")
-            if not price.is_finite() or price <= 0:
-                raise ValueError(f"{code}: цена должна быть положительной")
+            if not price.is_finite() or price < 1:
+                raise ValueError(f"{code}: цена должна быть не ниже 1 ₸")
             cost = (qty * price).quantize(Decimal(".01"))
             total += cost
             lines.append(dict(original, quantity=float(qty), cost=float(price), order_cost=float(cost)))

@@ -221,6 +221,33 @@ def test_persistent_approval_export_selected_only_and_budget(tmp_path):
         store.approve(order["id"], "Manager", False)
 
 
+@pytest.mark.parametrize("price", [0.01, 0.99])
+def test_order_rejects_price_below_one_tenge(api_client, price):
+    client, ds = api_client
+    p = client.post("/api/plans", json={}).json()
+    response = client.post("/api/orders", json={"plan_id": p["plan_id"], "lines": [
+        {"code": "A", "quantity": 12, "unit_cost": price}
+    ]})
+    assert response.status_code == 422
+    ds.showcase["cost"] = price
+    p = client.post("/api/plans", json={}).json()
+    response = client.post("/api/orders", json={"plan_id": p["plan_id"], "lines": [
+        {"code": "A", "quantity": 12}
+    ]})
+    assert response.status_code == 422  # Source prices cannot bypass the minimum.
+
+
+@pytest.mark.parametrize("price", [1, 1.25])
+def test_order_accepts_price_from_one_tenge_without_rounding(api_client, price):
+    client, _ = api_client
+    p = client.post("/api/plans", json={}).json()
+    response = client.post("/api/orders", json={"plan_id": p["plan_id"], "lines": [
+        {"code": "A", "quantity": 12, "unit_cost": price}
+    ]})
+    assert response.status_code == 201
+    assert response.json()["lines"][0]["cost"] == price
+
+
 def test_csv_formula_injection_and_quoting(tmp_path):
     store = Store(tmp_path / "orders.db")
     p = plan_snapshot()
