@@ -305,6 +305,34 @@ def test_whatif_demand_changes_demand_not_lead(api_client, monkeypatch):
     assert seen[2]["demand_multiplier"] == 1.2 and all(p["safety"] == 0.2 for p in seen)
 
 
+def test_http_automatic_lead_preserves_item_terms_and_manual_override(api_client):
+    client, ds = api_client
+    ds.showcase.attrs["lead_time"] = 2
+    ds.showcase["lead_time"] = 1
+    short = client.post("/api/plans", json={"lead_time": None}).json()["lines"][0]
+    ds.showcase["lead_time"] = 6
+    long = client.post("/api/plans", json={"lead_time": None}).json()["lines"][0]
+    manual = client.post("/api/plans", json={"lead_time": 1}).json()["lines"][0]
+    assert short["lead_time"] == 1 and long["lead_time"] == 6
+    assert long["recommended_qty"] > short["recommended_qty"]
+    assert manual["recommended_qty"] == short["recommended_qty"]
+    ds.showcase["lead_time"] = None
+    fallback = client.post("/api/plans", json={"lead_time": None}).json()["lines"][0]
+    assert fallback["lead_time"] == 2
+
+
+def test_automatic_delay_adds_to_each_item_and_keeps_source(api_client):
+    import app.main as main
+
+    _, ds = api_client
+    ds.showcase.loc[1] = ds.showcase.iloc[0].copy()
+    ds.showcase.loc[1, "code"] = "B"
+    ds.showcase["lead_time"] = [1, 6]
+    result, _ = main.calculate(main.PlanInput(), delay=0.5)
+    assert {x.code: x.lead_time for x in result.states} == {"A": 1.5, "B": 6.5}
+    assert ds.showcase.lead_time.tolist() == [1, 6]
+
+
 def test_source_version_changes_with_file(tmp_path, monkeypatch):
     import app.datasets as ds
 

@@ -10,12 +10,13 @@
 <label class="field">Поставщик<select id="supplier"></select></label>
 <label class="field">Категория<select id="category"><option value="">Все категории</option></select></label>
 <label class="field">Склад<select id="warehouse"><option value="">Все доступные</option></select></label>
-<label class="field">Срок поставки, мес.<input id="lead" type="number" min="0.1" max="11.5" step="0.1" value="1.5"></label>
+<label class="field">Срок поставки, мес.<input id="lead" type="number" min="0.1" max="11.5" step="0.1" placeholder="Из данных" aria-describedby="leadHelp"></label>
 <label class="field">Страховой запас, мес.<input id="safety" type="number" min="0" max="12" step="0.1" value="0.5"></label>
 <label class="field">Бюджет, ₸ (0 — без лимита)<input id="budget" type="number" min="0" value="0"></label>
 <button id="calc" class="btn primary">Рассчитать заказ</button>
 </div>
 <details><summary>Доступ к серверу</summary><label>API-ключ, если настроен <input id="apiKey" type="password" autocomplete="off"></label><button id="connect" class="btn">Подключиться</button></details>
+<p id="leadHelp">Пустой срок — из данных товара, затем поставщика. Число заменяет срок для всех товаров; очистите поле, чтобы вернуться к данным.</p>
 <div id="error" class="err" role="alert" hidden></div><p id="loading" hidden>Расчёт…</p>
 </section>
 <section id="dataCard" class="card" hidden><div class="section-label">Данные и ограничения</div><p id="dataInfo"></p><ul id="warnings"></ul></section>

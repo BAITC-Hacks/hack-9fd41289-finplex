@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .config import get_settings
 from .core.alerts import AlertEngine, AlertSettings
-from .core.planner import apply_budget, compute_orders
+from .core.planner import apply_budget, compute_orders, finite
 from .datasets import DATASETS, available, load_dataset
 from .llm import generate_summary, is_configured
 from .orders import Store, export_csv
@@ -115,7 +115,15 @@ def calculate(body, multiplier=1, delay=0):
     full = ds.showcase
     lead = body.lead_time
     if delay:
-        lead = (lead if lead is not None else full.attrs.get("lead_time", 1.5)) + delay
+        if lead is not None:
+            lead += delay
+        else:
+            full = full.copy()
+            full["lead_time"] = full.apply(
+                lambda row: finite(row.get("lead_time"), "lead_time", 0.01,
+                                   default=full.attrs.get("lead_time", 1.5)) + delay,
+                axis=1,
+            )
     result = compute_orders(
         full,
         ds.history,

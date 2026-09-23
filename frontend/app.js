@@ -19,7 +19,7 @@ async function api(path, body) {
 }
 async function json(path, body) { return (await api(path, body)).json(); }
 async function guarded(fn) { $('error').hidden = true; try { await fn(); } catch (error) { showError(error); } }
-function params() { return {supplier: $('supplier').value, lead_time: Number($('lead').value), safety: Number($('safety').value), budget: Number($('budget').value), category: $('category').value || null, warehouse: $('warehouse').value || null}; }
+function params() { return {supplier: $('supplier').value, lead_time: $('lead').value.trim() === '' ? null : Number($('lead').value), safety: Number($('safety').value), budget: Number($('budget').value), category: $('category').value || null, warehouse: $('warehouse').value || null}; }
 function fillOptions(id, values, title) { const options = values.map(v => {const o = el('option', v); o.value = v; return o;}); const first = el('option', title); first.value = ''; $(id).replaceChildren(first, ...options); }
 async function loadOptions() {
   const run = ++optionsRun, supplier = $('supplier').value;
@@ -28,7 +28,8 @@ async function loadOptions() {
     const result = await json(`/api/options?supplier=${encodeURIComponent(supplier)}`);
     if (run !== optionsRun) return;
     fillOptions('category', result.categories, 'Все категории'); fillOptions('warehouse', result.warehouses, 'Все доступные');
-    $('lead').value = result.lead_time;
+    $('lead').value = '';
+    $('lead').title = `Из данных товара; если срок не указан — срок поставщика ${result.lead_time} мес. Введите число для общего переопределения.`;
     renderMetadata(result.metadata);
   } finally { if (run === optionsRun) $('calc').disabled = false; }
 }
