@@ -1,39 +1,39 @@
 <!doctype html>
 <html lang="ru" data-theme="light">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Планирование закупок</title><link rel="stylesheet" href="styles.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Finplex — заказы поставщикам</title><link rel="stylesheet" href="styles.css"></head>
 <body>
-<header class="topbar"><div class="brand">Планирование заказов поставщикам</div><div class="top-right"><span id="status" class="status"></span><button id="theme" class="theme-btn">Тема</button></div></header>
+<header class="topbar"><div class="brand">Finplex <span class="tag">Закупки</span></div><div class="top-right"><span id="status" class="status" role="status">Подключаемся…</span><a href="#savedOrders">Сохранённые заказы</a><button id="theme" class="theme-btn">Светлая / тёмная тема</button></div></header>
 <main class="container">
-<div class="hint-banner">Рассчитайте потребность → проверьте данные и количество → сохраните черновик → утвердите → скачайте заказ. Отправки поставщику в этом сервисе нет.</div>
-<section class="card"><div class="section-label">Настройки расчёта</div>
-<div class="filters-bar">
+<div class="intro"><p class="eyebrow">ПОПОЛНЕНИЕ СКЛАДА</p><h1>Что нужно заказать?</h1><p>Выберите поставщика. Мы рассчитаем количество, а вы проверите и утвердите заказ.</p><ol class="steps"><li><b>1</b> Рассчитайте потребность</li><li><b>2</b> Выберите товары</li><li><b>3</b> Утвердите и скачайте</li></ol></div>
+<section class="card"><h2>1. Рассчитайте потребность</h2><p class="helper">Для первого расчёта достаточно выбрать поставщика. Остальные настройки можно оставить как есть.</p>
+<div class="filters-bar basic-fields">
 <label class="field">Поставщик<select id="supplier"></select></label>
-<label class="field">Категория<select id="category"><option value="">Все категории</option></select></label>
-<label class="field">Склад<select id="warehouse"><option value="">Все доступные</option></select></label>
-<label class="field">Срок поставки, мес.<input id="lead" type="number" min="0.1" max="11.5" step="0.1" placeholder="Из данных" aria-describedby="leadHelp"></label>
-<label class="field">Страховой запас, мес.<input id="safety" type="number" min="0" max="12" step="0.1" value="0.5"></label>
-<label class="field">Бюджет, ₸ (0 — без лимита)<input id="budget" type="number" min="0" value="0"></label>
-<button id="calc" class="btn primary">Рассчитать заказ</button>
+<label class="field">Категория товаров<select id="category"><option value="">Все категории</option></select></label>
+<label class="field">Склад<select id="warehouse"><option value="">Все доступные</option></select><small>В исходных данных остатки сведены по складам.</small></label>
 </div>
-<details><summary>Доступ к серверу</summary><label>API-ключ, если настроен <input id="apiKey" type="password" autocomplete="off"></label><button id="connect" class="btn">Подключиться</button></details>
-<p id="leadHelp">Пустой срок — из данных товара, затем поставщика. Число заменяет срок для всех товаров; очистите поле, чтобы вернуться к данным.</p>
-<div id="error" class="err" role="alert" hidden></div><p id="loading" hidden>Расчёт…</p>
+<details class="advanced"><summary>Настроить срок, запас и бюджет</summary><div class="filters-bar">
+<label class="field">Срок поставки, дней<input id="lead" type="number" min="1" max="350" step="1" placeholder="Из данных" aria-describedby="leadHelp"><small id="leadHelp">Пусто — используем срок товара. Число задаёт общий срок всем товарам.</small></label>
+<label class="field">Дополнительный запас, дней<input id="safety" type="number" min="0" max="365" step="1" value="15"><small>По умолчанию — 15 дней спроса. Статистический запас также учитывается.</small></label>
+<label class="field">Бюджет заказа, ₸<input id="budget" type="number" min="0" value="0"><small>0 — без ограничения. Товары без цены нужно оценить вручную.</small></label>
+</div></details>
+<div class="action-row"><button id="calc" class="btn primary big">Рассчитать потребность</button><span class="helper">Это рекомендация. Заказ ещё не создаётся.</span></div>
+<div id="error" class="err" role="alert" hidden></div><p id="loading" role="status" hidden>Анализируем продажи и остатки. Это может занять несколько секунд…</p>
+<details id="connectionHelp" class="connection" hidden><summary>Не удаётся подключиться?</summary><p class="helper">Проверьте, что Docker запущен. API-ключ нужен только если его настроил администратор.</p><label id="apiCredentials" hidden>Ключ доступа, выданный администратором <input id="apiKey" type="password" autocomplete="off"></label><button id="connect" class="btn">Повторить подключение</button></details>
 </section>
-<section id="dataCard" class="card" hidden><div class="section-label">Данные и ограничения</div><p id="dataInfo"></p><ul id="warnings"></ul></section>
-<section id="kpiCard" class="card" hidden><div class="section-label">Итоги расчёта</div><div id="kpis" class="kpis"></div><p id="summary"></p></section>
-<section id="chartCard" class="card" hidden><div class="section-label">История и календарный прогноз</div><h3 id="chartTitle"></h3><svg id="chart" class="chart" viewBox="0 0 800 240" role="img" aria-label="График продаж и прогноза"></svg><p id="chartHint" class="tag"></p></section>
+<section id="dataCard" class="card data-card" hidden><h2>На каких данных считаем</h2><p id="dataInfo"></p><details><summary id="dataWarnings">Ограничения исходных данных</summary><ul id="warnings"></ul></details></section>
+<section id="kpiCard" class="card" hidden><h2>Результат расчёта</h2><div id="kpis" class="kpis"></div><p id="summary"></p></section>
 <section id="tableCard" class="card" hidden>
-<div class="section-label">Рекомендации</div>
-<div class="table-tools"><input id="search" placeholder="Код, артикул или название"><label><input type="checkbox" id="urgentOnly"> Только срочные</label><button id="selectBudget" class="btn">Выбрать оценённые в бюджете</button><button id="clearSelection" class="btn">Снять выбор</button></div>
-<p id="selection"></p>
-<div class="table-wrap"><table id="table"><thead><tr><th>Выбор</th><th>Код 1С / артикул</th><th>Товар</th><th>Количество</th><th>Цена, ₸</th><th>Срочность / обоснование</th></tr></thead><tbody></tbody></table></div>
-<div class="table-tools"><button id="prevPage" class="btn">Назад</button><span id="pageInfo"></span><button id="nextPage" class="btn">Далее</button></div>
-<label>Комментарий к заказу <input id="note" maxlength="2000"></label><button id="saveDraft" class="btn primary" disabled>Сохранить черновик</button>
-<button id="whatifButton" class="btn">Сравнить сценарии</button><div id="whatifKpis"></div>
+<h2>2. Выберите товары для заказа</h2><p class="helper">Отметьте нужные строки галочками. Количество и цену можно изменить. Пустая цена означает, что её нет в исходных данных.</p>
+<div class="table-tools"><input id="search" type="search" aria-label="Поиск товаров" placeholder="Найти по названию, коду или артикулу"><label><input type="checkbox" id="urgentOnly"> Только с риском дефицита</label><button id="selectBudget" class="btn">Выбрать все с ценой в бюджете</button><button id="clearSelection" class="btn">Снять выбор</button></div>
+<div class="table-wrap"><table id="table"><thead><tr><th>Выбрать</th><th>Код / артикул</th><th>Товар</th><th>Заказать, ед.</th><th>Цена за ед., ₸</th><th>Почему рекомендуем</th></tr></thead><tbody></tbody></table></div>
+<div class="table-tools pagination"><button id="prevPage" class="btn">Назад</button><span id="pageInfo"></span><button id="nextPage" class="btn">Далее</button></div>
+<div class="review-bar"><p id="selection" role="status"></p><label class="field">Комментарий к заказу — необязательно<input id="note" maxlength="2000" placeholder="Например: согласовать дату поставки"></label><button id="saveDraft" class="btn primary big" disabled>Перейти к проверке</button><small>Сохранит выбранные товары в черновик. Поставщику ничего не отправляется.</small></div>
+<details><summary>Что изменится при задержке поставки или росте спроса?</summary><p class="helper">Сравните исходный план с задержкой на полмесяца и ростом спроса на 20%.</p><button id="whatifButton" class="btn">Сравнить сценарии</button><div id="whatifKpis"></div></details>
 </section>
-<section id="draftCard" class="card" hidden><div class="section-label">Заказ</div><p id="draftInfo"></p><div id="draftLines" class="table-wrap"></div>
-<div id="confirmation"><label>Ответственный сотрудник <input id="reviewer" maxlength="150"></label><p><label><input id="verified" type="checkbox"> Проверены остатки, сроки поступлений, единицы, цены и предупреждения. Подтверждаю выбранное количество.</label></p><button id="approve" class="btn primary">Утвердить заказ</button></div>
-<button id="export" class="btn" disabled>Скачать утверждённый CSV</button></section>
-<section class="card"><div class="section-label">Сохранённые заказы</div><button id="refreshOrders" class="btn">Обновить</button><div id="orders"></div></section>
+<details id="chartCard" class="card" hidden><summary>История продаж и прогноз выбранного товара</summary><h3 id="chartTitle"></h3><svg id="chart" class="chart" viewBox="0 0 800 240" role="img" aria-label="График продаж и прогноза"></svg><p id="chartHint" class="tag"></p></details>
+<section id="draftCard" class="card" hidden><h2 id="draftTitle">3. Проверьте и утвердите заказ</h2><p id="draftInfo"></p><div id="draftLines" class="table-wrap"></div>
+<div id="confirmation"><p class="helper">Черновик сохранён. Проверьте строки ниже. Для изменения количества вернитесь к рекомендациям и сохраните новый черновик.</p><label class="field">Кто утверждает заказ?<input id="reviewer" maxlength="150" placeholder="Имя ответственного сотрудника"></label><p><label class="confirm-check"><input id="verified" type="checkbox"> Я проверил остатки, сроки поступлений, цены, единицы и предупреждения. Количество согласовано.</label></p><button id="approve" class="btn primary big">Утвердить заказ</button></div>
+<div class="action-row"><button id="export" class="btn" disabled>Скачать заказ в CSV</button><span class="helper">Доступно после утверждения. Файл для передачи в учётную систему; автоматической отправки нет.</span></div></section>
+<section id="savedOrders" class="card"><div class="section-heading"><div><h2>Сохранённые заказы</h2><p class="helper">Здесь появятся ваши черновики и утверждённые заказы. Нажмите заказ, чтобы открыть.</p></div><button id="refreshOrders" class="btn">Обновить список</button></div><p id="ordersStatus" class="helper" role="status" aria-live="polite"></p><div id="orders"></div></section>
 </main><script src="app.js"></script>
 </body></html>
