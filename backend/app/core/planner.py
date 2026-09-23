@@ -82,39 +82,67 @@ class PlanResult:
     spike_units_total: float = 0.0   # сколько единиц-выбросов отфильтровано
 
     def as_dict(self) -> dict[str, Any]:
-        deficit = sum(1 for l in self.lines if l.urgency == "Высокая")
+        deficit = sum(1 for ln in self.lines if ln.urgency == "Высокая")
         return {
             "supplier": self.supplier,
             "orders_count": len(self.lines),
             "deficit_count": deficit,
             "excess_count": self.excess_count,
-            "total_units": round(sum(l.recommended_qty for l in self.lines), 1),
-            "total_cost": round(sum(l.order_cost() for l in self.lines)),
+            "total_units": round(sum(ln.recommended_qty for ln in self.lines), 1),
+            "total_cost": round(sum(ln.order_cost() for ln in self.lines)),
             "spike_items": self.spike_items,
             "spike_units_total": round(self.spike_units_total, 1),
             "summary": self.summary,
-            "lines": [l.as_dict() for l in self.lines],
+            "lines": [ln.as_dict() for ln in self.lines],
         }
 
 
-def detect_spikes(qtys: list[float], z: float = SPIKE_Z) -> tuple[float, int]:
-    """Найти разовые крупные продажи (выбросы) в списке продаж по месяцам/сделкам.
-    Возвращает (сумма_выбросов, количество). Выбросы исключаются из регулярного спроса.
+IQR_K = 3.0   # порог выброса: медиана + k*IQR (PRD 6.2.4)
+
+
+def _quantile(sorted_vals: list[float], q: float) -> float:
+    """Линейная интерполяция квантиля (без numpy)."""
+    if not sorted_vals:
+        return 0.0
+    if len(sorted_vals) == 1:
+        return sorted_vals[0]
+    pos = q * (len(sorted_vals) - 1)
+    lo = int(pos)
+    frac = pos - lo
+    if lo + 1 < len(sorted_vals):
+        return sorted_vals[lo] + frac * (sorted_vals[lo + 1] - sorted_vals[lo])
+    return sorted_vals[lo]
+
+
+def detect_spikes(qtys: list[float], k: float = IQR_K) -> tuple[float, int]:
+    """Найти разовые крупные продажи (выбросы) по правилу медиана + k*IQR (PRD 6.2.4).
+
+    Возвращает (сумма_выбросов, количество). Выбросы исключаются из регулярного спроса,
+    но логируются отдельно (прозрачность + критерий приёмки п.7.4).
     """
-    clean = [q for q in qtys if q > 0]
+    clean = sorted(q for q in qtys if q > 0)
     if len(clean) < 4:
         return 0.0, 0
-    mean = statistics.mean(clean)
-    stdev = statistics.pstdev(clean)
-    if stdev == 0:
+    median = _quantile(clean, 0.5)
+    q1 = _quantile(clean, 0.25)
+    q3 = _quantile(clean, 0.75)
+    iqr = q3 - q1
+    if iqr <= 0:
         return 0.0, 0
-    spike_sum = 0.0
-    spike_cnt = 0
-    for q in clean:
-        if (q - mean) / stdev >= z:
-            spike_sum += q
-            spike_cnt += 1
-    return spike_sum, spike_cnt
+    threshold = median + k * iqr
+    spikes = [q for q in clean if q > threshold]
+    return sum(spikes), len(spikes)
+
+
+def safety_stock(monthly: list[float], lead_time: float, z: float = 1.65) -> float:
+    """Страховой запас: z * σ(спроса) * sqrt(lead_time) (PRD 6.2.2).
+    σ считаем по месячному спросу (активные месяцы).
+    """
+    active = [m for m in monthly if m > 0]
+    if len(active) < 2:
+        return 0.0
+    sigma = statistics.pstdev(active)
+    return z * sigma * (lead_time ** 0.5)
 
 
 def _monthly_sales(row: pd.Series) -> list[float]:
@@ -152,31 +180,34 @@ def compute_orders(
         deal_qtys = hist_by_code.get(code, [])
         spike_sum, spike_cnt = detect_spikes(deal_qtys if deal_qtys else monthly)
 
+        # Очищенный от выбросов месячный ряд: выбросы заменяем на медиану активных.
+        # Используется для σ (страховой запас) и сезонности, чтобы выброс не раздувал их.
+        monthly_clean = list(monthly)
+        if months_active:
+            _sorted = sorted(months_active)
+            _median = _quantile(_sorted, 0.5)
+            _q1, _q3 = _quantile(_sorted, 0.25), _quantile(_sorted, 0.75)
+            _iqr = _q3 - _q1
+            if _iqr > 0:
+                _thr = _median + IQR_K * _iqr
+                monthly_clean = [(_median if m > _thr else m) for m in monthly]
+
         # --- must-have 1: базовый месячный спрос ---
         # За основу берём готовый "Ср мес за 12 мес" партнёра (надёжный ориентир),
         # но если детектировали всплеск — пересчитываем среднее БЕЗ выбросов.
         partner_avg = float(row.get("avg_month_12", 0.0))
-        if months_active:
-            recent = monthly[-12:] if len(monthly) >= 12 else monthly
-            recent_active = [m for m in recent if m > 0]
-            if recent_active and len(recent_active) >= 4:
-                mean = statistics.mean(recent_active)
-                std = statistics.pstdev(recent_active) or 1
-                clean = [m for m in recent_active if (m - mean) / std < SPIKE_Z]
-                own_avg = sum(clean) / len(clean) if clean else mean
-            else:
-                own_avg = statistics.mean(recent_active) if recent_active else 0.0
-            # берём более консервативную из двух оценок, чтобы не перезаказать
-            base_demand = own_avg if own_avg > 0 else partner_avg
+        clean_active = [m for m in monthly_clean if m > 0]
+        if clean_active:
+            # базовый спрос — среднее по очищенному ряду (выбросы уже заменены)
+            base_demand = statistics.mean(clean_active)
         else:
             base_demand = partner_avg
 
-        # --- must-have 2: сезонность ---
-        # Кэф. Сез-ти партнёра — относительный (может быть <0), НЕ множитель.
-        # Считаем сезонный множитель сами: спрос последних 3 мес / средний по году.
+        # --- must-have 2: сезонность (PRD 6.2.3) ---
+        # Сезонный множитель = средний спрос последних 3 мес / средний по очищенному году.
         season_mult = 1.0
-        if len(monthly) >= 6 and base_demand > 0:
-            last3 = [m for m in monthly[-3:] if m >= 0]
+        if len(monthly_clean) >= 6 and base_demand > 0:
+            last3 = [m for m in monthly_clean[-3:] if m >= 0]
             if last3:
                 recent_mean = statistics.mean(last3)
                 season_mult = max(0.6, min(recent_mean / base_demand if base_demand else 1.0, 1.8))
@@ -198,8 +229,11 @@ def compute_orders(
                 stockout_adj = base_demand * 0.10 * min(zero_in_span, 4)
                 seasonal_demand += stockout_adj
 
-        # --- must-have 1: целевой запас и итоговый заказ ---
-        target_stock = seasonal_demand * (lead_time + safety)
+        # --- must-have 1: целевой запас и итоговый заказ (PRD 6.2.2) ---
+        # target = спрос за срок поставки + страховой запас (z*σ*sqrt(lead))
+        # σ по ОЧИЩЕННОМУ ряду — выброс не должен раздувать страховой запас.
+        ss = safety_stock(monthly_clean, lead_time)
+        target_stock = seasonal_demand * lead_time + ss
         free_stock = float(row.get("free_stock", 0.0))
         in_transit = float(row.get("in_transit", 0.0))
         need = target_stock - free_stock - in_transit
@@ -208,9 +242,9 @@ def compute_orders(
         cost = float(row.get("cost", 0.0))
         coverage_months = (free_stock + in_transit) / seasonal_demand if seasonal_demand > 0 else 99.0
 
-        # --- избыточный запас: остатка хватает надолго (> 3× срок поставки) ---
+        # --- избыточный запас: остатка хватает надолго (> target * коэф. допуска 1.5) ---
         if need <= 0:
-            if seasonal_demand > 0 and coverage_months > (lead_time + safety) * 3:
+            if seasonal_demand > 0 and (free_stock + in_transit) > target_stock * 1.5:
                 excess_count += 1
             if spike_cnt:
                 spike_items += 1
@@ -220,10 +254,10 @@ def compute_orders(
         item_moq = moq.get(code, 1.0)
         qty = item_moq * (int((need - 1e-9) / item_moq) + 1) if item_moq > 0 else need
 
-        # срочность по покрытию остатком
+        # срочность по покрытию остатком относительно срока поставки
         if coverage_months < lead_time:
             urgency = "Высокая"
-        elif coverage_months < lead_time + safety:
+        elif coverage_months < lead_time + 0.5:
             urgency = "Средняя"
         else:
             urgency = "Плановая"
@@ -246,7 +280,7 @@ def compute_orders(
 
         reason_parts = [
             f"спрос ~{seasonal_demand:.0f} шт/мес (база {base_demand:.0f}, сезон ×{season:.2f}, рост ×{growth:.2f})",
-            f"цель на {lead_time + safety:.1f} мес = {target_stock:.0f}",
+            f"цель {target_stock:.0f} = спрос×{lead_time:.1f}мес + страх.запас {ss:.0f}",
             f"минус свободный {free_stock:.0f} и в пути {in_transit:.0f}",
         ]
         if spike_cnt:
@@ -272,9 +306,9 @@ def compute_orders(
 
     # сортировка: сначала срочные, потом по объёму
     order = {"Высокая": 0, "Средняя": 1, "Плановая": 2}
-    lines.sort(key=lambda l: (order.get(l.urgency, 3), -l.recommended_qty))
+    lines.sort(key=lambda ln: (order.get(ln.urgency, 3), -ln.recommended_qty))
 
-    urgent = sum(1 for l in lines if l.urgency == "Высокая")
+    urgent = sum(1 for ln in lines if ln.urgency == "Высокая")
     summary = (
         f"{supplier}: рекомендовано заказать {len(lines)} позиций "
         f"(срочных: {urgent}). Разовые всплески исключены из регулярного спроса."

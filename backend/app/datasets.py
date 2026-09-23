@@ -1,9 +1,12 @@
 """Реестр встроенных наборов данных партнёра (для демо без загрузки файлов)."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+# Путь к данным: из env DATA_DIR (Docker) или корень репозитория (локально).
+_env_dir = os.environ.get("DATA_DIR")
+DATA_DIR = Path(_env_dir) if _env_dir else Path(__file__).resolve().parent.parent.parent / "data"
 
 # supplier key -> файлы
 DATASETS = {
