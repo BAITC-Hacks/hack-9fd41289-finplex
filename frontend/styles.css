@@ -1,33 +1,42 @@
 /* Плоский минимализм. Темы через CSS-переменные. Цвет — только смысловой сигнал. */
 :root {
-  --bg: #f7f8fa;
+  --bg: #f1f2f3;
   --surface: #ffffff;
-  --surface-2: #fbfcfd;
-  --border: rgba(0,0,0,0.10);
-  --text: #1a1d24;
-  --muted: #6b7280;
-  --accent: #2f6bff;
-  --high-bg: #fdeceb; --high-fg: #c0392b;
-  --mid-bg: #fef7e6;  --mid-fg: #b7791f;
-  --low-bg: #eaf7ef;  --low-fg: #2e7d46;
-  --chart-fact: #2f6bff;
-  --chart-forecast: #9aa0ad;
-  --stockout: rgba(192,57,43,0.10);
+  --surface-2: #f6f7f8;
+  --border: rgba(40, 91, 111, 0.16);
+  --text: #26343b;
+  --muted: #71818a;
+  --accent: #287895;
+  --high-bg: #fdeceb;
+  --high-fg: #c0392b;
+  --mid-bg: #fff5dc;
+  --mid-fg: #a96f00;
+  --low-bg: #eaf5ee;
+  --low-fg: #2e7d46;
+  --chart-fact: #287895;
+  --chart-forecast: #9aaeb7;
+  --stockout: rgba(192, 57, 43, 0.10);
 }
+
 [data-theme="dark"] {
-  --bg: #0f1115;
-  --surface: #1a1d24;
-  --surface-2: #161920;
-  --border: rgba(255,255,255,0.10);
-  --text: #e6e8ee;
-  --muted: #9aa0ad;
-  --accent: #4f8cff;
-  --high-bg: rgba(245,87,76,0.14); --high-fg: #ff9a91;
-  --mid-bg: rgba(240,180,41,0.14);  --mid-fg: #f0b429;
-  --low-bg: rgba(53,196,106,0.12);  --low-fg: #4bd07f;
-  --chart-fact: #4f8cff;
-  --chart-forecast: #6b7280;
-  --stockout: rgba(245,87,76,0.12);
+  --bg: #17242a;
+  --surface: #203139;
+  --surface-2: #263a43;
+  --border: rgba(191, 218, 228, 0.16);
+  --text: #e8f0f3;
+  --muted: #a3b8c0;
+  --accent: #3990ad;
+
+  --high-bg: rgba(245, 87, 76, 0.14);
+  --high-fg: #ff9a91;
+  --mid-bg: rgba(240, 180, 41, 0.14);
+  --mid-fg: #f0b429;
+  --low-bg: rgba(53, 196, 106, 0.12);
+  --low-fg: #4bd07f;
+
+  --chart-fact: #55a9c4;
+  --chart-forecast: #8299a2;
+  --stockout: rgba(245, 87, 76, 0.12);
 }
 
 * { box-sizing: border-box; }
