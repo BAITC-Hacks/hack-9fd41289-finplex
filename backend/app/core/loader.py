@@ -114,6 +114,9 @@ def load_sales_history(path: Path):
     result.loc[result.qty < 0, "operation"] = "return_or_correction"
     if "customer_id" in df:
         result["customer_id"] = df["customer_id"].fillna("").astype(str)
+    for source, target in [("Номенклатура", "name"), ("Наименование", "name"), ("Артикул", "article")]:
+        if source in df:
+            result[target] = df[source].fillna("").astype(str).str.strip()
     result = result[valid].copy()
     result.attrs["quality"] = {
         "input_rows": len(df),

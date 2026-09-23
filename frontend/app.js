@@ -69,7 +69,7 @@ async function calculate() {
     const result = await json('/api/plans', params(), calculationController.signal);
     if (run !== calculationRun) return;
     plan = result; lines = result.lines; page = 0; selected.clear(); edits.clear(); invalidateDraft();
-    for (const l of lines) edits.set(l.code, {quantity: l.recommended_qty, unit_cost: l.cost});
+    for (const l of lines) edits.set(l.code, {quantity: l.recommended_qty, unit_cost: l.cost, article:l.article || '', unit:l.unit === 'не указана' ? '' : l.unit});
     renderMetadata(result.metadata);
     $('kpiCard').hidden = false; $('tableCard').hidden = false;
     $('kpis').replaceChildren(...[[result.orders_count, 'Позиций'], [result.deficit_count, 'Рисков дефицита (включая уже заказанные)'], [fmt(result.total_cost), 'Известная стоимость, ₸'], [result.unpriced_count, 'Без цены'], [result.within_budget, 'В бюджете']].map(([v,label]) => { const k = el('div', null, 'kpi'); k.append(el('div', v, 'v'), el('div', label, 'l')); return k; }));
@@ -81,16 +81,18 @@ async function calculate() {
   finally { if (run === calculationRun) { busy = false; calculationController = null; $('calc').disabled = optionsLoading; $('loading').hidden = true; } }
 }
 function selectionInfo() {
-  let total = 0, missing = 0, invalid = 0;
+  let total = 0, missing = 0, invalid = 0, requisites = 0;
   for (const code of selected) {
     const e = edits.get(code), l = lines.find(x => x.code === code);
     if (!(e.unit_cost >= 1)) missing++;
     else total += Math.round(e.quantity * e.unit_cost * 100) / 100;
     if (!(e.quantity >= l.min_qty) || Math.abs(e.quantity / l.moq - Math.round(e.quantity / l.moq)) > 1e-7) invalid++;
+    if (!e.article?.trim() || !e.unit?.trim() || e.unit.trim() === 'не указана') requisites++;
   }
   const over = plan && plan.parameters.budget > 0 && total > plan.parameters.budget;
   $('selection').textContent = !selected.size ? 'Отметьте товары галочками слева. Затем нажмите «Перейти к проверке».' : `Выбрано ${selected.size} · Сумма с известными ценами: ${fmt(total)} ₸.${missing ? ` Укажите цену не ниже 1 ₸ для ${missing} позиций.` : ''}${invalid ? ` Исправьте количество для ${invalid} позиций: соблюдайте минимум и кратность.` : ''}${over ? ' Превышен бюджет.' : ''}`;
-  $('saveDraft').disabled = !selected.size || !!missing || !!invalid || over;
+  if (requisites) $('selection').textContent += ` Заполните артикул и единицу у ${requisites} позиций.`;
+  $('saveDraft').disabled = !selected.size || !!missing || !!invalid || !!requisites || over;
 }
 function renderTable() {
   const q = $('search').value.toLowerCase();
@@ -103,6 +105,15 @@ function renderTable() {
     const c1 = el('td'); c1.append(choose);
     const code = el('td', `${l.code} / ${l.article || 'нет артикула'}`, 'mono');
     const name = el('td', `${l.name} (${l.unit})`); const chart = el('button', 'График', 'btn'); chart.addEventListener('click', () => drawChart(l)); name.append(el('br'), chart);
+    for (const [field, cell, missingField, label, max] of [
+      ['article',code,!l.article,'Артикул поставщика',150],
+      ['unit',name,!l.unit || l.unit === 'не указана','Единица измерения',40]
+    ]) {
+      if (!missingField) continue;
+      const input=el('input'); input.type='text'; input.maxLength=max; input.value=edits.get(l.code)[field]; input.placeholder=label; input.setAttribute('aria-label',`${label} ${l.code}`);
+      input.addEventListener('input',()=>{edits.get(l.code)[field]=input.value; invalidateDraft(); selectionInfo();});
+      cell.append(el('p','Нет в данных — укажите по справочнику поставщика','tag'),input);
+    }
     const qtyCell = el('td'); const qty = el('input'); qty.type = 'number'; qty.min = l.min_qty; qty.step = l.moq; qty.value = edits.get(l.code).quantity; qty.setAttribute('aria-label', `Количество ${l.code}`);
     qty.addEventListener('input', () => { edits.get(l.code).quantity = Number(qty.value); invalidateDraft(); selectionInfo(); });
     qtyCell.append(qty, el('div', `Мин. ${fmt(l.min_qty)}, кратность ${fmt(l.moq)}`, 'tag'));
@@ -143,6 +154,8 @@ function showDraft(value) {
   const table = el('table'), head = el('tr'); for (const label of ['Код / артикул','Товар','Количество','Цена','Сумма']) head.append(el('th',label)); table.append(head);
   for (const l of value.lines) {const r = el('tr'); for (const v of [`${l.code} / ${l.article}`,l.name,`${fmt(l.quantity)} ${l.unit}`,fmt(l.cost),fmt(l.order_cost)]) r.append(el('td',v)); table.append(r);}
   $('draftLines').replaceChildren(table); $('confirmation').hidden = value.status === 'approved'; $('export').disabled = value.status !== 'approved';
+  const corrected=value.lines.filter(l=>Object.keys(l.manual_requisites || {}).length).length;
+  if(corrected) $('draftInfo').textContent += ` Реквизиты уточнены вручную у ${corrected} позиций — проверьте перед утверждением.`;
   $('draftCard').scrollIntoView?.({behavior:'smooth',block:'start'});
 }
 async function saveDraft() {
@@ -195,7 +208,7 @@ $('refreshOrders').addEventListener('click',()=>guarded(loadOrders));
 $('whatifButton').addEventListener('click',()=>guarded(whatif));
 for (const id of ['search','urgentOnly']) $(id).addEventListener('input',()=>{page=0;renderTable();});
 $('prevPage').addEventListener('click',()=>{page--;renderTable();}); $('nextPage').addEventListener('click',()=>{page++;renderTable();});
-$('selectBudget').addEventListener('click',()=>{for(const l of lines) if(l.in_budget && edits.get(l.code).unit_cost >= 1) selected.add(l.code); invalidateDraft();renderTable();});
+$('selectBudget').addEventListener('click',()=>{for(const l of lines) {const e=edits.get(l.code); if(l.in_budget && e.unit_cost >= 1 && e.article?.trim() && e.unit?.trim() && e.unit.trim() !== 'не указана') selected.add(l.code);} invalidateDraft();renderTable();});
 $('clearSelection').addEventListener('click',()=>{selected.clear();invalidateDraft();renderTable();});
 $('theme').addEventListener('click',()=>document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 guarded(connect);

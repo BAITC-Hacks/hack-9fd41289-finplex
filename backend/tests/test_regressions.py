@@ -278,6 +278,18 @@ def api_client(tmp_path, monkeypatch):
     return TestClient(main.app), ds
 
 
+def test_http_accepts_confirmed_requisites_for_missing_source_fields(api_client):
+    client, ds = api_client
+    ds.showcase["article"] = ""
+    ds.showcase["unit"] = "не указана"
+    p = client.post("/api/plans", json={}).json()
+    response = client.post("/api/orders", json={"plan_id": p["plan_id"], "lines": [
+        {"code": "A", "quantity": 12, "unit_cost": 10, "article": "CONFIRMED-A", "unit": "шт"}
+    ]})
+    assert response.status_code == 201
+    assert response.json()["lines"][0]["manual_requisites"]["unit"]["confirmed"] == "шт"
+
+
 def test_http_selected_draft_approval_export_and_stale_version(api_client):
     client, ds = api_client
     p = client.post("/api/plans", json={"supplier": "systeme"}).json()

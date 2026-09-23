@@ -89,3 +89,22 @@ test('opening a chart reveals and scrolls to the selected product', () => {
   assert.equal(p.fields.chartTitle.textContent,'Test product');
   assert.equal(p.fields.chart.children.length,5);
 });
+
+test('missing requisites block saving until the manager supplies both fields', () => {
+  const p=page();
+  vm.runInContext('lines=[{code:"A",min_qty:1,moq:1}]; plan={parameters:{budget:0}}; selected.add("A"); edits.set("A",{quantity:2,unit_cost:10,article:"",unit:""}); selectionInfo()',p.context);
+  assert.equal(p.fields.saveDraft.disabled,true);
+  assert.match(p.fields.selection.textContent,/артикул и единицу/);
+  vm.runInContext('edits.get("A").article="SUP-A"; edits.get("A").unit="шт"; selectionInfo()',p.context);
+  assert.equal(p.fields.saveDraft.disabled,false);
+  vm.runInContext('edits.get("A").article=" "; selectionInfo()',p.context);
+  assert.equal(p.fields.saveDraft.disabled,true);
+});
+
+test('recommendation renders fields for missing article and unit', () => {
+  const p=page();
+  vm.runInContext('document.getElementById("table").querySelector=()=>document.getElementById("tbody"); lines=[{code:"A",name:"Product",article:"",unit:"не указана",min_qty:1,moq:1,in_budget:true,urgency:"Высокая",warnings:[]}]; plan={parameters:{budget:0}}; edits.set("A",{quantity:1,unit_cost:10,article:"",unit:""}); renderTable()',p.context);
+  const cells=p.fields.tbody.children[0].children;
+  assert.equal(cells[1].children.find(x=>x.type==='text').placeholder,'Артикул поставщика');
+  assert.equal(cells[2].children.find(x=>x.type==='text').placeholder,'Единица измерения');
+});

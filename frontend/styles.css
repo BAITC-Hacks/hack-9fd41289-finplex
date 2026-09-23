@@ -199,7 +199,7 @@ input[type=search] { flex:1; min-width:240px; min-height:42px; }
   #table td::before { content:attr(data-label); display:block; font-size:12px; color:var(--muted); margin-bottom:5px; }
   #table td:nth-child(2), #table td:nth-child(3), #table td:nth-child(6), #table td[colspan] { grid-column:1 / -1; }
   #table td:first-child { grid-column:1 / -1; display:flex; gap:12px; align-items:center; }
-  #table td input[type=number] { width:100%; min-height:44px; font-size:16px; }
+  #table td input[type=number], #table td input[type=text] { width:100%; max-width:100%; min-height:44px; font-size:16px; }
   .table-tools { align-items:stretch; }
   .table-tools input[type=search] { min-width:0; width:100%; flex-basis:100%; font-size:16px; }
   .review-bar { padding:14px; } .review-bar .btn { width:100%; }

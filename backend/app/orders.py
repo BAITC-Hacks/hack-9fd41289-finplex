@@ -57,8 +57,10 @@ class Store:
                 raise ValueError("Повторяющаяся позиция или товар отсутствует в плане")
             seen.add(code)
             original = catalog[code]
-            if original["unit"] in ("", "не указана") or not original["article"]:
-                raise ValueError(f"{code}: заполните единицу и артикул в planning.json, затем пересчитайте план")
+            article = (item.get("article") if item.get("article") is not None else original["article"]).strip()
+            unit = (item.get("unit") if item.get("unit") is not None else original["unit"]).strip()
+            if unit in ("", "не указана") or not article:
+                raise ValueError(f"{code}: укажите подтверждённые артикул и единицу измерения")
             qty = Decimal(str(item["quantity"]))
             step = Decimal(str(original["moq"]))
             minimum = Decimal(str(original["min_qty"]))
@@ -72,7 +74,22 @@ class Store:
                 raise ValueError(f"{code}: цена должна быть не ниже 1 ₸")
             cost = (qty * price).quantize(Decimal(".01"))
             total += cost
-            lines.append(dict(original, quantity=float(qty), cost=float(price), order_cost=float(cost)))
+            corrections = {
+                field: {"source": original[field], "confirmed": value}
+                for field, value in [("article", article), ("unit", unit)]
+                if value != original[field]
+            }
+            lines.append(
+                dict(
+                    original,
+                    article=article,
+                    unit=unit,
+                    manual_requisites=corrections,
+                    quantity=float(qty),
+                    cost=float(price),
+                    order_cost=float(cost),
+                )
+            )
         if plan["parameters"]["budget"] > 0 and total > Decimal(str(plan["parameters"]["budget"])):
             raise ValueError("Выбранные позиции превышают бюджет; измените черновик или пересчитайте план")
         data = {

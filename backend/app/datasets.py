@@ -77,45 +77,83 @@ def _load(key, version):
     as_of = config.get("as_of", ds["as_of"])
     pd.Timestamp(as_of)
     history = load_sales_history(paths[0])
+    history = history[history.date < pd.Timestamp(as_of).normalize() + pd.Timedelta(days=1)].copy()
     monthly = load_monthly(paths[1]).set_index("code")
     stock = load_monthly(paths[2], "s_").set_index("code")
     moq = load_moq(paths[4])
     seasons = load_seasonality(paths[5], as_of)
     transit = (load_showcase(paths[3]) if key == "systeme" else load_transit_iek(paths[3])).set_index("code")
-    codes = monthly.index.union(stock.index).union(transit.index)
+    codes = monthly.index.union(stock.index).union(transit.index).union(pd.Index(history.code.unique()))
     out = monthly.reindex(codes).copy()
     warnings = [
-        "Нет обезличенного ID клиента: группировка аномалий по документу, не по клиенту.",
         "Нет точных интервалов stockout: нулевые начальные остатки — только сигнал для проверки.",
         "Автоперемещения отключены: нет согласованных остатков, резервов и спроса каждого склада.",
     ]
+    if "customer_id" not in history or not history.customer_id.fillna("").astype(str).str.strip().ne("").any():
+        warnings.append("Нет обезличенного ID клиента: группировка аномалий по документу, не по клиенту.")
     for c in stock:
         if c.startswith("s_"):
             out[c] = stock[c].reindex(codes)
     for c in ["name", "article", "category", "cost", "growth_coef", "free_stock", "in_transit", "transit_lots"]:
         values = transit[c].reindex(codes) if c in transit else pd.Series(index=codes, dtype=object)
+        if c in {"name", "article", "category"}:
+            values = values.map(lambda value: None if isinstance(value, str) and not value.strip() else value)
         out[c] = values.combine_first(out[c]) if c in out else values
     stock_cols = sorted(c for c in out if c.startswith("s_") and c[2:] <= as_of[:7])
-    last_stock = stock_cols[-1]
+    last_stock = stock_cols[-1] if stock_cols else None
     fallback = out.free_stock.isna()
-    out.loc[fallback, "free_stock"] = out.loc[fallback, last_stock]
+    out.loc[fallback, "free_stock"] = out.loc[fallback, last_stock] if last_stock else None
     out["stock_as_of"] = as_of
-    out.loc[fallback, "stock_as_of"] = last_stock[2:] + "-01"
+    out.loc[fallback, "stock_as_of"] = last_stock[2:] + "-01" if last_stock else "неизвестно"
     out["stock_estimated"] = fallback
+    out.loc[out.free_stock.isna(), "stock_as_of"] = "неизвестно"
     out["warehouse"] = "Все склады (сводно)"
     out["category"] = out.category.fillna("Без категории").replace("", "Без категории")
-    units = history.groupby("code").unit.agg(lambda x: next((v for v in x if v), ""))
-    out["unit"] = (
-        out.get("unit", pd.Series(index=codes, dtype=object)).replace("", None).fillna(units).fillna("не указана")
-    )
+    # Fill absent identifiers only from an unambiguous value for the same 1C code.
+    # Never guess an article from a product name or treat a sales price as a purchase price.
+    for field in ("name", "article", "unit"):
+        candidates = []
+        for source in (monthly, stock, transit):
+            if field in source:
+                candidates.append(source[field])
+        if field in history:
+            candidates.append(history.set_index("code")[field])
+        values = pd.concat(candidates) if candidates else pd.Series(dtype=object)
+        values = values.dropna().astype(str).str.strip()
+        values = values[~values.isin(["", "не указана", "nan", "None"])]
+        unique = values.groupby(level=0).agg(lambda v: sorted(set(v)))
+        resolved = unique[unique.map(len) == 1].map(lambda v: v[0])
+        current = out.get(field, pd.Series(index=codes, dtype=object)).map(
+            lambda value: None if isinstance(value, str) and not value.strip() else value
+        )
+        missing = current.isna() | current.eq("не указана")
+        out[field] = current.mask(missing, resolved.reindex(codes))
+        conflicts = int((missing & unique.map(len).reindex(codes).gt(1)).sum())
+        if conflicts:
+            warnings.append(f"{field}: неоднозначные реквизиты для {conflicts} товаров; требуется проверка.")
+    out["unit"] = out.unit.fillna("не указана")
     out["name"] = out.name.fillna(stock.name).fillna(pd.Series(codes, index=codes))
     out["article"] = out.article.fillna("")
-    out["in_transit"] = out.in_transit.fillna(0)
+    out["in_transit"] = pd.to_numeric(out.in_transit).fillna(0)
     out["transit_lots"] = out.transit_lots.map(lambda v: v if isinstance(v, list) else [])
     missing_summary = ~out.index.isin(monthly.index)
     invoice_months = (
         history.assign(period=history.date.dt.to_period("M").astype(str)).groupby(["code", "period"]).qty.sum()
     )
+    # Do not lose history-only months; zeros inside the observed interval remain zeros.
+    summary_periods = [c[2:] for c in out if c.startswith("m_")]
+    observed = summary_periods + list(invoice_months.index.get_level_values("period"))
+    if observed:
+        # The summary defines the reliable start of the observation window.
+        # Sparse older invoices must not introduce fictitious zero-sales years.
+        start = min(summary_periods) if summary_periods else min(observed)
+        for period in pd.period_range(start, max(observed), freq="M").astype(str):
+            if "m_" + period not in out:
+                out["m_" + period] = (
+                    invoice_months.xs(period, level="period").reindex(codes)
+                    if period in invoice_months.index.get_level_values("period")
+                    else 0.0
+                )
     for c in [c for c in out if c.startswith("m_")]:
         if c[2:] in invoice_months.index.get_level_values("period"):
             fallback_sales = invoice_months.xs(c[2:], level="period").reindex(out.index).clip(lower=0)
@@ -163,7 +201,7 @@ def _load(key, version):
     ]
     if fallback.any():
         warnings.append(
-            f"{int(fallback.sum())} позиций используют начальный остаток {last_stock[2:]}; обновите до утверждения."
+            f"{int(fallback.sum())} позиций без текущего остатка; источник замены: {last_stock[2:] if last_stock else 'отсутствует'}. Обновите до утверждения."
         )
     out = out.reset_index(names="code")
     out.attrs.update(

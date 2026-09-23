@@ -70,6 +70,8 @@ class ItemInput(StrictModel):
     code: str
     quantity: float = Field(gt=0, le=1e12)
     unit_cost: float | None = Field(None, ge=1, le=1e12)
+    article: str | None = Field(None, min_length=1, max_length=150)
+    unit: str | None = Field(None, min_length=1, max_length=40)
 
 
 class DraftInput(StrictModel):

@@ -23,7 +23,7 @@
 <section id="dataCard" class="card data-card" hidden><h2>На каких данных считаем</h2><p id="dataInfo"></p><details><summary id="dataWarnings">Ограничения исходных данных</summary><ul id="warnings"></ul></details></section>
 <section id="kpiCard" class="card" hidden><h2>Результат расчёта</h2><div id="kpis" class="kpis"></div><p id="summary"></p></section>
 <section id="tableCard" class="card" hidden>
-<h2>2. Выберите товары для заказа</h2><p class="helper">Отметьте нужные строки галочками. Количество и цену можно изменить. Пустая цена означает, что её нет в исходных данных.</p>
+<h2>2. Выберите товары для заказа</h2><p class="helper">Отметьте нужные строки галочками. Количество и цену можно изменить. Недостающие артикул и единицу укажите по справочнику поставщика; уточнения сохранятся в заказе. Цены и остатки не подставляются наугад.</p>
 <div class="table-tools"><input id="search" type="search" aria-label="Поиск товаров" placeholder="Найти по названию, коду или артикулу"><label><input type="checkbox" id="urgentOnly"> Только с риском дефицита</label><button id="selectBudget" class="btn">Выбрать все с ценой в бюджете</button><button id="clearSelection" class="btn">Снять выбор</button></div>
 <div class="table-wrap"><table id="table"><thead><tr><th>Выбрать</th><th>Код / артикул</th><th>Товар</th><th>Заказать, ед.</th><th>Цена за ед., ₸</th><th>Почему рекомендуем</th></tr></thead><tbody></tbody></table></div>
 <div class="table-tools pagination"><button id="prevPage" class="btn">Назад</button><span id="pageInfo"></span><button id="nextPage" class="btn">Далее</button></div>
