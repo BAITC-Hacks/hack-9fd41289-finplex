@@ -16,14 +16,17 @@
 
 ## 2. Что реализовано
 
-### Основные функции:
+### Основные функции (реализовано):
 
-- [ ] **Расчёт базовой потребности** — анализ истории продаж, остатков, товаров в пути и категорий товаров
-- [ ] **Прогнозирование спроса** — учёт сезонности и устойчивого роста спроса
-- [ ] **Компенсация дефицитов** — оценка и коррекция упущенного спроса при stockout
-- [ ] **Фильтрация выбросов** — автоматическое выявление и исключение разовых крупных заказов
-- [ ] **Формирование заказов** — группировка по поставщикам с обоснованием каждой позиции
-- [ ] **Экспорт результатов** — вывод в формате таблицы/дашборда
+- [x] **Расчёт базовой потребности** — анализ истории продаж, остатков, товаров в пути и категорий товаров
+- [x] **Прогнозирование спроса** — учёт сезонности и устойчивого роста спроса
+- [x] **Компенсация дефицитов** — оценка и коррекция упущенного спроса при stockout
+- [x] **Фильтрация выбросов** — автоматическое выявление и исключение разовых крупных заказов (детект по z-score)
+- [x] **Формирование заказов** — группировка по поставщикам с обоснованием каждой позиции
+- [x] **Дашборд** — веб-интерфейс: KPI, график спроса/прогноза, таблица заказов, экспорт CSV
+- [x] **AI-резюме** — LLM-сводка для менеджера (OpenAI-совместимый провайдер, с fallback без ключа)
+
+> Работает на реальных данных партнёра (Systeme Electric): 497 товаров, 77k+ строк продаж.
 
 ### Опциональные возможности:
 
@@ -127,59 +130,46 @@ project/
 - Python 3.8+
 - pip или conda
 
-### Шаги установки:
+### Запуск (актуальный)
 
+Данные партнёра уже в `data/`. Нужен Python 3.11+.
+
+**Бэкенд (API):**
 ```bash
-# 1. Клонировать репозиторий
-git clone <repo-url>
-cd logistics
-
-# 2. Создать виртуальное окружение
-python -m venv venv
-source venv/bin/activate  # На Windows: venv\Scripts\activate
-
-# 3. Установить зависимости
+cd backend
+python -m venv .venv
+.venv\Scripts\activate            # Windows;  Linux/Mac: source .venv/bin/activate
 pip install -r requirements.txt
-
-# 4. Подготовить данные (поместить CSV-файлы в data/)
-# — sales_history.csv
-# — current_inventory.csv
-# — goods_in_transit.csv
-# — stockouts.csv
-# — suppliers_reference.csv
+uvicorn app.main:app --port 8020
 ```
+API: http://localhost:8020  ·  проверка: http://localhost:8020/health
 
-### Запуск:
-
+**Фронтенд (дашборд):**
 ```bash
-# Основной сценарий
-python src/order_calculator.py --sales-file data/sales_history.csv \
-                               --inventory-file data/current_inventory.csv \
-                               --output result_orders.csv
-
-# Или запуск API (если реализован)
-python src/api.py --port 8000
+cd frontend
+python -m http.server 3100
 ```
+Открыть http://localhost:3100 → выбрать поставщика → «Рассчитать».
 
-### Пример использования (Python):
+**LLM (опционально):** создать `backend/.env` с `LLM_API_KEY=...` (OpenAI-совместимый).
+Без ключа AI-резюме работает по шаблону — приложение полностью функционально.
 
-```python
-from src.data_loader import DataLoader
-from src.order_calculator import OrderCalculator
+### Структура (актуальная)
 
-# Загрузить данные
-loader = DataLoader()
-sales = loader.load_sales('data/sales_history.csv')
-inventory = loader.load_inventory('data/current_inventory.csv')
-suppliers = loader.load_suppliers('data/suppliers_reference.csv')
-
-# Рассчитать заказы
-calculator = OrderCalculator()
-orders = calculator.calculate(sales, inventory, suppliers)
-
-# Вывести результат
-print(orders)
-orders.to_csv('recommended_orders.csv', index=False)
+```
+backend/
+  app/
+    main.py            # FastAPI: /health, /api/suppliers, /api/plan
+    config.py          # настройки (env), параметры расчёта
+    llm.py             # LLM-обёртка + fallback
+    datasets.py        # реестр наборов данных партнёра
+    core/
+      loader.py        # чтение Excel-выгрузок 1С (витрина, история, MOQ)
+      planner.py       # ЯДРО: расчёт заказов, детект выбросов, сезонность, stockout
+  requirements.txt
+frontend/
+  index.html, styles.css, app.js   # дашборд (KPI, график, таблица по поставщикам)
+data/                  # реальные данные партнёра (Systeme Electric, ИЭК)
 ```
 
 ---

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Рекомендованные заказы поставщикам</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Рекомендованные заказы поставщикам</div>
+    <div class="top-right">
+      <span class="status" id="status">проверка API…</span>
+      <button class="theme-btn" id="theme">🌙 Тема</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Панель фильтров -->
+    <section class="card">
+      <div class="filters-bar">
+        <div class="field">
+          Периодичность расчёта
+          <div class="seg" id="period">
+            <button data-p="day">День</button>
+            <button data-p="week">Неделя</button>
+            <button data-p="month" class="active">Месяц</button>
+          </div>
+        </div>
+        <label class="field">Склад
+          <select id="warehouse"><option value="">Все склады</option></select>
+        </label>
+        <label class="field">Поставщик (данные)
+          <select id="supplier"></select>
+        </label>
+        <label class="field">Срок поставки, мес
+          <input id="lead" type="number" value="1.5" step="0.5" min="0.5" style="width:90px" />
+        </label>
+        <div class="spacer"></div>
+        <button class="btn primary" id="calc">Рассчитать</button>
+      </div>
+      <div id="error" class="err" hidden style="margin-top:12px"></div>
+    </section>
+
+    <!-- KPI -->
+    <section class="card">
+      <div class="kpis" id="kpis">
+        <div class="kpi"><div class="v">—</div><div class="l">нажмите «Рассчитать»</div></div>
+      </div>
+    </section>
+
+    <!-- График спроса и прогноза -->
+    <section class="card" id="chartCard" hidden>
+      <div class="chart-head">
+        <div class="chart-title" id="chartTitle">Спрос и прогноз</div>
+        <div class="legend">
+          <span><span class="dot"></span>факт</span>
+          <span><span class="dot forecast"></span>прогноз</span>
+          <span><span class="dot stockout"></span>период дефицита</span>
+        </div>
+      </div>
+      <svg class="chart" id="chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+      <p class="tag" id="chartHint"></p>
+    </section>
+
+    <!-- Таблица заказов -->
+    <section class="card" id="tableCard" hidden>
+      <div class="table-tools">
+        <input id="search" type="text" placeholder="Поиск по артикулу или названию…" />
+        <label class="tag"><input type="checkbox" id="urgentOnly" /> только срочные</label>
+        <button class="btn" id="export">Экспорт CSV</button>
+        <button class="btn primary" id="approve" disabled>Утвердить выбранные (0)</button>
+      </div>
+      <div class="table-wrap">
+        <table id="table">
+          <thead>
+            <tr>
+              <th style="width:36px"></th>
+              <th>Артикул</th><th>Поставщик</th><th>Кол-во</th>
+              <th>Обоснование</th><th>Срочность</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
