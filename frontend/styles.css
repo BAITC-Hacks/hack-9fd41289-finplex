@@ -101,3 +101,34 @@ th { color:var(--muted); font-weight:500; }
 .detail-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px 20px; }
 .detail-grid b { color:var(--text); font-weight:500; }
 .err { padding:12px; border-radius:8px; background:var(--high-bg); color:var(--high-fg); font-size:13px; }
+
+/* --- Подсказки и понятный интерфейс для менеджера --- */
+.hint-banner {
+  background: var(--low-bg); color: var(--text); border: 0.5px solid var(--border);
+  border-radius: 10px; padding: 14px 40px 14px 16px; font-size: 14px; position: relative;
+  line-height: 1.5;
+}
+.hint-close {
+  position: absolute; top: 10px; right: 10px; background: transparent; border: none;
+  cursor: pointer; color: var(--muted); font-size: 15px;
+}
+.section-label { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: 12px;
+  text-transform: uppercase; letter-spacing: 0.03em; }
+.field-label { display: flex; align-items: center; gap: 5px; }
+.help {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 50%; background: var(--border);
+  color: var(--muted); font-size: 10px; font-style: normal; cursor: help; flex: none;
+}
+.help:hover { background: var(--accent); color: #fff; }
+.tooltip {
+  position: fixed; z-index: 100; max-width: 260px; background: #1a1d24; color: #fff;
+  border: 0.5px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 8px 11px;
+  font-size: 12px; line-height: 1.4; pointer-events: none; box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+[data-theme="dark"] .tooltip { background: #2a2e37; }
+.btn.big { padding: 11px 24px; font-size: 15px; }
+.chk-label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; }
+.status.ok::before { content: "● "; color: var(--low-fg); }
+.status.bad::before { content: "● "; color: var(--high-fg); }
+.kpi .hint-mini { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.3; }
