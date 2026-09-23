@@ -46,6 +46,9 @@ class OrderLine:
     cost: float = 0.0          # себестоимость единицы (для суммы заказа в тенге)
     coverage_months: float = 0.0
     monthly: list[float] = field(default_factory=list)  # ряд продаж для графика
+    transfer_from: str = ""    # перераспределение: склад-донор (PRD 6.3.1)
+    transfer_qty: float = 0.0  # сколько переместить со склада вместо заказа
+    in_budget: bool = True     # прошла ли позиция бюджетный лимит (PRD 6.3.2)
 
     def order_cost(self) -> float:
         return self.recommended_qty * self.cost
@@ -57,6 +60,9 @@ class OrderLine:
             "reason": self.reason, "reason_tag": self.reason_tag,
             "order_cost": round(self.order_cost()),
             "monthly": [round(m, 1) for m in self.monthly],
+            "transfer_from": self.transfer_from,
+            "transfer_qty": round(self.transfer_qty, 1),
+            "in_budget": self.in_budget,
             "detail": {
                 "base_demand_month": round(self.base_demand, 2),
                 "seasonal_demand_month": round(self.seasonal_demand, 2),
@@ -254,6 +260,27 @@ def compute_orders(
         item_moq = moq.get(code, 1.0)
         qty = item_moq * (int((need - 1e-9) / item_moq) + 1) if item_moq > 0 else need
 
+        # --- доп. функция 1: перераспределение между складами (PRD 6.3.1) ---
+        # Если на других складах есть излишек этого товара — рекомендуем перемещение
+        # вместо (или в дополнение к) внешнего заказа.
+        transfer_from = ""
+        transfer_qty = 0.0
+        wh = {
+            "Розничный склад": float(row.get("wh_retail", 0.0)),
+            "Витрина": float(row.get("wh_vitrina", 0.0)),
+        }
+        # донор — склад с наибольшим излишком (запас заметно больше месячного спроса)
+        for wh_name, wh_stock in sorted(wh.items(), key=lambda kv: -kv[1]):
+            surplus = wh_stock - seasonal_demand  # что сверх месячного спроса склада
+            if surplus > 0 and seasonal_demand > 0:
+                transfer_qty = min(need, surplus)
+                if transfer_qty >= 1:
+                    transfer_from = wh_name
+                    # заказ у поставщика уменьшаем на объём перемещения
+                    remaining = max(0.0, need - transfer_qty)
+                    qty = item_moq * (int((remaining - 1e-9) / item_moq) + 1) if (item_moq > 0 and remaining > 0) else remaining
+                break
+
         # срочность по покрытию остатком относительно срока поставки
         if coverage_months < lead_time:
             urgency = "Высокая"
@@ -295,6 +322,9 @@ def compute_orders(
             spike_items += 1
             spike_units_total += spike_sum
 
+        if transfer_from:
+            reason_tag = f"переместить со склада «{transfer_from}»"
+
         lines.append(OrderLine(
             code=code, name=row["name"], supplier=supplier,
             recommended_qty=qty, urgency=urgency, reason=reason, reason_tag=reason_tag,
@@ -302,6 +332,7 @@ def compute_orders(
             free_stock=free_stock, in_transit=in_transit, target_stock=target_stock,
             spike_removed=spike_sum, spike_count=spike_cnt, stockout_adj=stockout_adj,
             moq=item_moq, cost=cost, coverage_months=coverage_months, monthly=monthly,
+            transfer_from=transfer_from, transfer_qty=transfer_qty,
         ))
 
     # сортировка: сначала срочные, потом по объёму
@@ -317,3 +348,26 @@ def compute_orders(
     return PlanResult(supplier=supplier, lines=lines, summary=summary,
                       excess_count=excess_count, spike_items=spike_items,
                       spike_units_total=spike_units_total)
+
+
+def apply_budget(result: PlanResult, budget: float) -> PlanResult:
+    """Доп. функция 2: приоритизация по бюджету (PRD 6.3.2).
+
+    Позиции уже отсортированы по срочности. Накопительно набираем заказы, пока
+    не упрёмся в бюджет; остальные помечаем in_budget=False (отсечены) с причиной.
+    Основной расчёт не меняется — только флаг и порядок.
+    """
+    if budget <= 0:
+        for ln in result.lines:
+            ln.in_budget = True
+        return result
+    spent = 0.0
+    for ln in result.lines:
+        c = ln.order_cost()
+        if spent + c <= budget:
+            ln.in_budget = True
+            spent += c
+        else:
+            ln.in_budget = False
+    return result
+

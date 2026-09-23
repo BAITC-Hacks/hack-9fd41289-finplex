@@ -42,24 +42,53 @@ async function calc() {
   $("error").hidden = true;
   const supplier = $("supplier").value || "systeme";
   const lead = $("lead").value;
+  const budget = $("budget").value || 0;
   try {
-    const r = await fetch(`${API}/api/plan?supplier=${supplier}&lead_time=${lead}&limit=400`);
+    const r = await fetch(`${API}/api/plan?supplier=${supplier}&lead_time=${lead}&budget=${budget}&limit=400`);
     const d = await r.json();
     if (!r.ok) { showError(d.error ? `${d.error.code}: ${d.error.message}` : "Ошибка"); return; }
     render(d);
+    loadWhatif(supplier);
   } catch { showError("Не удалось связаться с API. Проверьте, что бэкенд запущен."); }
+}
+
+async function loadWhatif(supplier) {
+  try {
+    const d = await (await fetch(`${API}/api/whatif?supplier=${supplier}`)).json();
+    $("whatifCard").hidden = false;
+    const seg = $("whatif"); seg.innerHTML = "";
+    const kpis = $("whatifKpis");
+    d.scenarios.forEach((s, i) => {
+      const b = document.createElement("button");
+      b.textContent = s.title; if (i === 0) b.classList.add("active");
+      b.addEventListener("click", () => {
+        seg.querySelectorAll("button").forEach(x => x.classList.remove("active"));
+        b.classList.add("active");
+        kpis.innerHTML = `
+          <div class="kpi"><div class="v">${s.orders}</div><div class="l">заказов</div></div>
+          <div class="kpi danger"><div class="v">⚠ ${s.deficit}</div><div class="l">риск дефицита</div></div>
+          <div class="kpi"><div class="v">${money(s.cost)} ₸</div><div class="l">сумма закупки</div></div>`;
+      });
+      seg.appendChild(b);
+    });
+    seg.querySelector("button")?.click();
+  } catch {}
 }
 function showError(m){ const e=$("error"); e.textContent=m; e.hidden=false; }
 
 function render(d) {
   LINES = d.lines || [];
   // KPI
+  const budgetKpi = d.budget > 0
+    ? `<div class="kpi"><div class="v">${d.within_budget}/${d.orders_count}</div><div class="l">В рамках бюджета</div></div>`
+    : `<div class="kpi"><div class="v">${d.transfers}</div><div class="l">Перемещений между складами</div></div>`;
   $("kpis").innerHTML = `
     <div class="kpi"><div class="v">${d.orders_count}</div><div class="l">Артикулов к заказу</div></div>
     <div class="kpi danger"><div class="v">⚠ ${d.deficit_count}</div><div class="l">Риск дефицита</div></div>
     <div class="kpi"><div class="v">${d.excess_count}</div><div class="l">Избыточный запас</div></div>
     <div class="kpi"><div class="v">${money(d.total_cost)} ₸</div><div class="l">Сумма заказа</div></div>
-    <div class="kpi"><div class="v">${d.spike_items}</div><div class="l">Исключено разовых заказов</div></div>`;
+    <div class="kpi"><div class="v">${d.spike_items}</div><div class="l">Исключено разовых заказов</div></div>
+    ${budgetKpi}`;
 
   // График по топ-позиции
   $("chartCard").hidden = false;
@@ -142,13 +171,19 @@ function drawTable() {
     items.forEach((l) => {
       const idx = LINES.indexOf(l);
       const tr = document.createElement("tr"); tr.className = "row-main";
+      if (l.in_budget === false) tr.classList.add("approved"); // приглушить вне бюджета
       const badge = l.urgency==="Высокая"?"high":l.urgency==="Средняя"?"mid":"low";
+      const transfer = l.transfer_from
+        ? ` <span class="badge low">↺ со склада «${l.transfer_from}» ${Math.round(l.transfer_qty)}</span>` : "";
+      const qtyCell = l.recommended_qty > 0
+        ? `<td class="qty">${Math.round(l.recommended_qty)}</td>`
+        : `<td class="qty" style="color:var(--muted)">0 (перемещение)</td>`;
       tr.innerHTML = `
         <td><input type="checkbox" class="chk" data-i="${idx}"></td>
         <td class="mono">${l.code}</td>
         <td>${l.name}</td>
-        <td class="qty">${Math.round(l.recommended_qty)}</td>
-        <td class="tag">${l.reason_tag}</td>
+        ${qtyCell}
+        <td class="tag">${l.reason_tag}${transfer}</td>
         <td><span class="badge ${badge}">${l.urgency}</span></td>`;
       tbody.appendChild(tr);
 

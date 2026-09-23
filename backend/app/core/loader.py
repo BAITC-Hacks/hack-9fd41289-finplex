@@ -58,6 +58,11 @@ def load_showcase(path: Path) -> pd.DataFrame:
     out["free_stock"] = df.get("Свободный остаток", 0).map(_num)
     out["in_transit"] = df.get("СЭ в пути 24.09", 0).map(_num)
 
+    # Остатки по складам (для перераспределения между складами, PRD 6.3.1)
+    out["wh_vitrina"] = df.get("Витрина", 0).map(_num)
+    out["wh_rc"] = df.get("РЦ ЕКТ  Рыскулова", df.get("РЦ ЕКТ Рыскулова", 0)).map(_num)
+    out["wh_retail"] = df.get("Розничный склад", 0).map(_num)
+
     # Помесячные продажи 2025-2026 для собственного расчёта сезонности
     for m in MONTHS_2025 + MONTHS_2026:
         if m in df.columns:

@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 
 from .config import get_settings
 from .core.loader import load_moq, load_sales_history, load_showcase
-from .core.planner import compute_orders
+from .core.planner import apply_budget, compute_orders
 from .datasets import DATASETS, available
 from .llm import generate_summary, is_configured
 
@@ -61,6 +61,7 @@ def suppliers() -> dict[str, Any]:
 def plan(supplier: str = Query(default="systeme"),
          lead_time: float = Query(default=None),
          safety: float = Query(default=None),
+         budget: float = Query(default=0.0, description="Бюджетный лимит, ₸ (0 = без лимита)"),
          limit: int = Query(default=100, ge=1, le=1000)) -> JSONResponse:
     """Рассчитать рекомендованные заказы по поставщику."""
     if supplier not in DATASETS:
@@ -78,12 +79,51 @@ def plan(supplier: str = Query(default="systeme"),
         lead_time=lead_time if lead_time else settings.lead_time_months,
         safety=safety if safety else settings.safety_months,
     )
+    # доп. функция 2: бюджетный лимит (PRD 6.3.2)
+    if budget and budget > 0:
+        apply_budget(result, budget)
+
     payload = result.as_dict()
+    # агрегаты по бюджету и перераспределению для дашборда
+    payload["budget"] = budget
+    payload["within_budget"] = sum(1 for ln in result.lines if ln.in_budget)
+    payload["transfers"] = sum(1 for ln in result.lines if ln.transfer_from)
     payload["lines"] = payload["lines"][:limit]
 
-    # LLM-резюме (или fallback-шаблон)
     payload["ai_summary"], payload["ai_source"] = _summary(result)
     return JSONResponse(content=payload, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/whatif")
+def whatif(supplier: str = Query(default="systeme")) -> JSONResponse:
+    """Доп. функция 3: what-if сценарии (PRD 6.3.3).
+    Заранее просчитанные сценарии тем же модулем с изменёнными параметрами.
+    """
+    if supplier not in DATASETS:
+        return JSONResponse(status_code=400,
+                            content={"error": {"code": "UNKNOWN_SUPPLIER", "message": f"Нет данных: {supplier}"}})
+    showcase, history, moq, name = _load_dataset(supplier)
+    base_lead = settings.lead_time_months
+
+    scenarios = []
+    # 1. Базовый
+    r0 = compute_orders(showcase, history, moq, supplier=name, lead_time=base_lead)
+    scenarios.append({"key": "base", "title": "Базовый сценарий",
+                      "orders": r0.as_dict()["orders_count"], "cost": r0.as_dict()["total_cost"],
+                      "deficit": r0.as_dict()["deficit_count"]})
+    # 2. Поставщик задерживает на 2 недели (lead +0.5 мес) -> больше страховой запас/заказ
+    r1 = compute_orders(showcase, history, moq, supplier=name, lead_time=base_lead + 0.5)
+    scenarios.append({"key": "delay", "title": "Поставщик задерживает +2 недели",
+                      "orders": r1.as_dict()["orders_count"], "cost": r1.as_dict()["total_cost"],
+                      "deficit": r1.as_dict()["deficit_count"]})
+    # 3. Спрос +20% (симулируем через удлинение срока покрытия — больше заказ)
+    r2 = compute_orders(showcase, history, moq, supplier=name, lead_time=base_lead * 1.2)
+    scenarios.append({"key": "demand_up", "title": "Спрос +20%",
+                      "orders": r2.as_dict()["orders_count"], "cost": r2.as_dict()["total_cost"],
+                      "deficit": r2.as_dict()["deficit_count"]})
+
+    return JSONResponse(content={"supplier": name, "scenarios": scenarios},
+                        headers={"Cache-Control": "no-store"})
 
 
 def _summary(result) -> tuple[str, str]:
