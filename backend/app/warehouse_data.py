@@ -31,7 +31,7 @@ class StockItem(Strict):
     stockout_days: dict[str, Nonnegative] = Field(default_factory=dict)
     cost: Annotated[float, Field(ge=1)] | None = None
     lead_time_days: Annotated[float, Field(gt=0, le=365)] | None = None
-    growth_coef: Annotated[float, Field(gt=0, le=10)] = 1
+    growth_coef: Annotated[float, Field(ge=-0.4, le=0.4)] | None = None
 
     @model_validator(mode="after")
     def validate_periods(self):

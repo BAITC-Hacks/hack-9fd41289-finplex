@@ -84,6 +84,18 @@ def test_stockout_and_reservation_affect_warehouse_order(tmp_path):
     assert state(load(tmp_path, data)).recommended_qty < base.recommended_qty
 
 
+def test_omitted_growth_preserves_historical_estimate_and_explicit_growth_is_a_fraction(tmp_path):
+    base = state(load(tmp_path, bundle()))
+    assert base.growth == 0  # Constant sales must not acquire a growth assumption.
+    data = bundle()
+    data["warehouses"][0]["items"][0]["growth_coef"] = 0.1
+    increased = state(load(tmp_path, data))
+    assert increased.growth == pytest.approx(0.1)
+    assert increased.recommended_qty > base.recommended_qty
+    data["warehouses"][0]["items"][0]["growth_coef"] = 0
+    assert state(load(tmp_path, data)).recommended_qty == base.recommended_qty
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
