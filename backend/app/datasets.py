@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from functools import lru_cache
 from pathlib import Path
 
@@ -48,6 +49,7 @@ class Dataset:
     history: pd.DataFrame
     moq: dict
     metadata: dict
+    warehouses: dict = dataclass_field(default_factory=dict)
 
 
 def available():
@@ -60,7 +62,7 @@ def available():
 
 def signature(key):
     paths = [DATA_DIR / key / name for name in DATASETS[key]["files"]]
-    paths += [DATA_DIR / key / "planning.json"]
+    paths += [DATA_DIR / key / "planning.json", DATA_DIR / key / "warehouses.json"]
     return tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) if p.exists() else (str(p), 0, 0) for p in paths)
 
 
@@ -222,4 +224,7 @@ def _load(key, version):
         "moq_matched": matched,
         "products": len(out),
     }
-    return Dataset(out, history, moq, metadata)
+    from .warehouse_data import load_warehouses
+
+    scopes = load_warehouses(DATA_DIR / key / "warehouses.json", out, history, moq, metadata)
+    return Dataset(out, history, moq, metadata, scopes)

@@ -148,6 +148,7 @@ def export_csv(order):
             "Сумма",
             "Обоснование",
             "Срочность",
+            "Склад",
         ]
     )
 
@@ -168,6 +169,41 @@ def export_csv(order):
                 line["order_cost"],
                 safe(line["reason"]),
                 line["urgency"],
+                safe(line.get("warehouse", "Все склады (сводно)")),
             ]
         )
     return ("\ufeff" + stream.getvalue()).encode("utf-8")
+
+
+def export_exchange(order):
+    """Versioned exchange contract, not a configuration-specific 1C document."""
+    if order["status"] != "approved":
+        raise ValueError("Экспорт доступен после утверждения")
+    return {
+        "schema": "finplex.purchase-order",
+        "schema_version": 1,
+        "external_id": order["id"],
+        "supplier_key": order["supplier_key"],
+        "currency": "KZT",
+        "status": "approved",
+        "approved_at": order["approved_at"],
+        "reviewer": order["reviewer"],
+        "source_version": order["source_version"],
+        "total": format(Decimal(str(order["total_cost"])), ".2f"),
+        "tax_treatment": "unspecified",
+        "lines": [
+            {
+                "code_1c": line["code"],
+                "supplier_article": line["article"],
+                "name": line["name"],
+                "unit": line["unit"],
+                "warehouse": line.get("warehouse", "Все склады (сводно)"),
+                "quantity": str(Decimal(str(line["quantity"]))),
+                "unit_price": str(Decimal(str(line["cost"]))),
+                "amount": format(Decimal(str(line["order_cost"])), ".2f"),
+                "reason": line["reason"],
+                "manual_requisites": line.get("manual_requisites", {}),
+            }
+            for line in order["lines"]
+        ],
+    }

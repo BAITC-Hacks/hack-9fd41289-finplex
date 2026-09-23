@@ -9,7 +9,7 @@
 <div class="filters-bar basic-fields">
 <label class="field">Поставщик<select id="supplier"></select></label>
 <label class="field">Категория товаров<select id="category"><option value="">Все категории</option></select></label>
-<label class="field">Склад<select id="warehouse"><option value="">Все доступные</option></select><small>В исходных данных остатки сведены по складам.</small></label>
+<label class="field">Склад<select id="warehouse"><option value="">Сводный расчёт</option></select><small>Отдельные склады появляются после загрузки их данных. Сводный расчёт использует исходную сводку.</small></label>
 </div>
 <details class="advanced"><summary>Настроить срок, запас и бюджет</summary><div class="filters-bar">
 <label class="field">Срок поставки, дней<input id="lead" type="number" min="1" max="350" step="1" placeholder="Из данных" aria-describedby="leadHelp"><small id="leadHelp">Пусто — используем срок товара. Число задаёт общий срок всем товарам.</small></label>
@@ -33,7 +33,7 @@
 <details id="chartCard" class="card" hidden><summary>История продаж и прогноз выбранного товара</summary><h3 id="chartTitle"></h3><svg id="chart" class="chart" viewBox="0 0 800 240" role="img" aria-label="График продаж и прогноза"></svg><p id="chartHint" class="tag"></p></details>
 <section id="draftCard" class="card" hidden><h2 id="draftTitle">3. Проверьте и утвердите заказ</h2><p id="draftInfo"></p><div id="draftLines" class="table-wrap"></div>
 <div id="confirmation"><p class="helper">Черновик сохранён. Проверьте строки ниже. Для изменения количества вернитесь к рекомендациям и сохраните новый черновик.</p><label class="field">Кто утверждает заказ?<input id="reviewer" maxlength="150" placeholder="Имя ответственного сотрудника"></label><p><label class="confirm-check"><input id="verified" type="checkbox"> Я проверил остатки, сроки поступлений, цены, единицы и предупреждения. Количество согласовано.</label></p><button id="approve" class="btn primary big">Утвердить заказ</button></div>
-<div class="action-row"><button id="export" class="btn" disabled>Скачать заказ в CSV</button><span class="helper">Доступно после утверждения. Файл для передачи в учётную систему; автоматической отправки нет.</span></div></section>
+<div class="action-row"><button id="export" class="btn" disabled>Скачать заказ в CSV</button><button id="exchange" class="btn" disabled>Скачать JSON для обмена</button><span class="helper">Доступно после утверждения. Файл для передачи в учётную систему; автоматической отправки нет.</span></div></section>
 <section id="savedOrders" class="card"><div class="section-heading"><div><h2>Сохранённые заказы</h2><p class="helper">Здесь появятся ваши черновики и утверждённые заказы. Нажмите заказ, чтобы открыть.</p></div><button id="refreshOrders" class="btn">Обновить список</button></div><p id="ordersStatus" class="helper" role="status" aria-live="polite"></p><div id="orders"></div></section>
 </main><script src="app.js"></script>
 </body></html>

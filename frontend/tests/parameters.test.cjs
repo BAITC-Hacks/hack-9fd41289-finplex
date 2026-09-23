@@ -20,6 +20,18 @@ function page() {
   return {fields, context, params: () => vm.runInContext('params()', context)};
 }
 
+test('both export formats follow approval and are disabled when draft is invalidated', () => {
+  const p = page();
+  vm.runInContext("showDraft({id:'x', status:'draft', lines:[], total_cost:0})", p.context);
+  assert.equal(p.fields.exchange.disabled, true);
+  assert.equal(p.fields.export.disabled, true);
+  vm.runInContext("showDraft({id:'x', status:'approved', lines:[], total_cost:0})", p.context);
+  assert.equal(p.fields.exchange.disabled, false);
+  assert.equal(p.fields.export.disabled, false);
+  vm.runInContext('invalidateDraft()', p.context);
+  assert.equal(p.fields.exchange.disabled, true);
+});
+
 test('blank means source terms, a number explicitly overrides, clearing restores', () => {
   const p = page();
   assert.equal(p.params().lead_time, null);

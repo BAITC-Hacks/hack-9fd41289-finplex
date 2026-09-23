@@ -30,7 +30,7 @@ async function loadOptions() {
   try {
     const result = await json(`/api/options?supplier=${encodeURIComponent(supplier)}`);
     if (run !== optionsRun) return;
-    fillOptions('category', result.categories, 'Все категории'); fillOptions('warehouse', result.warehouses, 'Все доступные');
+    fillOptions('category', result.categories, 'Все категории'); fillOptions('warehouse', result.warehouses, 'Сводный расчёт');
     $('lead').value = '';
     $('lead').title = `Из данных товара; если срок не указан — срок поставщика около ${Math.round(result.lead_time * DAYS_PER_MONTH)} дней. Введите дни для общего переопределения.`;
     renderMetadata(result.metadata);
@@ -53,7 +53,7 @@ async function connect() {
   else throw new Error('Нет полных наборов данных');
   await loadOrders();
 }
-function invalidateDraft() { draft = null; $('draftCard').hidden = true; $('export').disabled = true; }
+function invalidateDraft() { draft = null; $('draftCard').hidden = true; $('exchange').disabled = $('export').disabled = true; }
 function invalidatePlan() {
   calculationRun++; plan = null; lines = []; selected.clear(); edits.clear(); invalidateDraft();
   calculationController?.abort(); calculationController = null; busy = false;
@@ -153,7 +153,7 @@ function showDraft(value) {
   $('draftInfo').textContent = `Заказ ${value.id}, ${value.status === 'approved' ? 'утверждён' : 'черновик'}. Позиций: ${value.lines.length}, сумма ${fmt(value.total_cost)} ₸. ${value.note || ''}`;
   const table = el('table'), head = el('tr'); for (const label of ['Код / артикул','Товар','Количество','Цена','Сумма']) head.append(el('th',label)); table.append(head);
   for (const l of value.lines) {const r = el('tr'); for (const v of [`${l.code} / ${l.article}`,l.name,`${fmt(l.quantity)} ${l.unit}`,fmt(l.cost),fmt(l.order_cost)]) r.append(el('td',v)); table.append(r);}
-  $('draftLines').replaceChildren(table); $('confirmation').hidden = value.status === 'approved'; $('export').disabled = value.status !== 'approved';
+  $('draftLines').replaceChildren(table); $('confirmation').hidden = value.status === 'approved'; $('exchange').disabled = $('export').disabled = value.status !== 'approved';
   const corrected=value.lines.filter(l=>Object.keys(l.manual_requisites || {}).length).length;
   if(corrected) $('draftInfo').textContent += ` Реквизиты уточнены вручную у ${corrected} позиций — проверьте перед утверждением.`;
   $('draftCard').scrollIntoView?.({behavior:'smooth',block:'start'});
@@ -166,10 +166,10 @@ async function approve() {
   if (!draft) throw new Error('Сначала сохраните черновик');
   showDraft(await json(`/api/orders/${draft.id}/approve`,{reviewer:$('reviewer').value,verified_inputs:$('verified').checked})); await loadOrders();
 }
-async function download() {
+async function download(format = 'csv') {
   if (!draft || draft.status !== 'approved') return;
-  const blob = await (await api(`/api/orders/${draft.id}/export`)).blob(); const url = URL.createObjectURL(blob);
-  const a = el('a'); a.href=url; a.download=`order-${draft.id}.csv`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+  const blob = await (await api(`/api/orders/${draft.id}/${format === 'json' ? 'exchange' : 'export'}`)).blob(); const url = URL.createObjectURL(blob);
+  const a = el('a'); a.href=url; a.download=`order-${draft.id}.${format}`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 async function loadOrders() {
   const run = ++ordersRun, button = $('refreshOrders'), message = $('ordersStatus');
@@ -204,6 +204,7 @@ $('calc').addEventListener('click',()=>guarded(calculate));
 $('saveDraft').addEventListener('click',()=>guarded(saveDraft));
 $('approve').addEventListener('click',()=>guarded(approve));
 $('export').addEventListener('click',()=>guarded(download));
+$('exchange').addEventListener('click',()=>guarded(()=>download('json')));
 $('refreshOrders').addEventListener('click',()=>guarded(loadOrders));
 $('whatifButton').addEventListener('click',()=>guarded(whatif));
 for (const id of ['search','urgentOnly']) $(id).addEventListener('input',()=>{page=0;renderTable();});

@@ -16,7 +16,7 @@ from .core.alerts import AlertEngine, AlertSettings
 from .core.planner import apply_budget, compute_orders, finite
 from .datasets import DATASETS, available, load_dataset
 from .llm import generate_summary, is_configured
-from .orders import Store, export_csv
+from .orders import Store, export_csv, export_exchange
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version=settings.app_version)
@@ -106,6 +106,8 @@ def dataset(key):
 
 def calculate(body, multiplier=1, delay=0):
     ds = dataset(body.supplier)
+    if body.warehouse and body.warehouse in ds.warehouses:
+        ds = ds.warehouses[body.warehouse]
     frame = ds.showcase.copy()
     for field in ("category", "warehouse"):
         selected = getattr(body, field)
@@ -165,8 +167,8 @@ def suppliers():
 def options(supplier: str = "systeme"):
     ds = dataset(supplier)
     return {
-        "categories": sorted(set(ds.showcase.category)),
-        "warehouses": sorted(set(ds.showcase.warehouse)),
+        "categories": sorted(set(ds.showcase.category) | {c for scope in ds.warehouses.values() for c in scope.showcase.category}),
+        "warehouses": sorted(set(ds.showcase.warehouse) | set(ds.warehouses)),
         "metadata": ds.metadata,
         "lead_time": ds.showcase.attrs.get("lead_time", 1.5),
     }
@@ -272,6 +274,14 @@ def export(ident: str):
         data,
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="order-{ident}.csv"'},
+    )
+
+
+@app.get("/api/orders/{ident}/exchange")
+def exchange(ident: str):
+    return JSONResponse(
+        export_exchange(store.get("orders", ident)),
+        headers={"Content-Disposition": f'attachment; filename="order-{ident}.json"'},
     )
 
 
